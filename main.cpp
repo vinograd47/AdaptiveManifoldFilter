@@ -3,6 +3,7 @@
 #include <opencv2/core/core.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
 #include <opencv2/highgui/highgui.hpp>
+#include "adaptive_manifold_filter.hpp"
 
 using namespace std;
 using namespace cv;
@@ -18,9 +19,21 @@ int main(int argc, const char* argv[])
     Mat g, tilde_g;
     adaptiveManifoldFilter(img, g, tilde_g, 16.0, 0.2);
 
+    AdaptiveManifoldFilter filter;
+    Mat new_g, new_tilde_g;
+    filter.apply(img, new_g, new_tilde_g);
+
+    Mat diff, tilde_diff;
+    absdiff(g, new_g, diff);
+    absdiff(tilde_g, new_tilde_g, tilde_diff);
+
     imshow("img", img);
     imshow("g", g);
     imshow("tilde_g", tilde_g);
+    imshow("new_g", new_g);
+    imshow("new_tilde_g", new_tilde_g);
+    imshow("diff", diff);
+    imshow("tilde_diff", tilde_diff);
     waitKey();
 
     return 0;
@@ -614,7 +627,8 @@ void adaptiveManifoldFilter(InputArray _f, OutputArray _g, OutputArray _tilde_g,
     _f.getMat().convertTo(f, CV_64F, 1.0 / 255.0);
 
     // Use the center pixel as seed to random number generation.
-    rng = RNG(static_cast<uint64>(f.at<double>(f.rows / 2, f.cols / 2 * f.channels())));
+    const Point3d centralPix = f.at<Point3d>(f.rows / 2, f.cols / 2);
+    rng = RNG(static_cast<uint64>(centralPix.ddot(centralPix) * numeric_limits<uint64>::max()));
 
     sum_w_ki_Psi_blur = Mat::zeros(f.size(), f.type());
     sum_w_ki_Psi_blur_0 = Mat::zeros(f.size(), CV_64FC1);
