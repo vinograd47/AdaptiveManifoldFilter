@@ -1,6 +1,8 @@
 #include <iostream>
 #include <opencv2/core/core.hpp>
 #include <opencv2/highgui/highgui.hpp>
+#include <opencv2/contrib/contrib.hpp>
+#include <opencv2/photo/photo.hpp>
 #include "adaptive_manifold_filter.hpp"
 
 using namespace std;
@@ -72,8 +74,20 @@ int main(int argc, const char* argv[])
     filter.set("num_pca_iterations", num_pca_iterations);
 
     Mat dst, tilde_dst;
-
     filter.apply(img, dst, tilde_dst, jointImg);
+
+    TickMeter tm;
+    tm.start();
+    filter.apply(img, dst, tilde_dst, jointImg);
+    tm.stop();
+    cout << "Time : " << tm.getTimeMilli() << " ms" << endl;
+
+    Mat nlm_dst;
+    fastNlMeansDenoisingColored(img, nlm_dst, 10.0, 10.0);
+    tm.reset(); tm.start();
+    fastNlMeansDenoisingColored(img, nlm_dst, 10.0, 10.0);
+    tm.stop();
+    cout << "NLM : " << tm.getTimeMilli() << " ms" << endl;
 
     if (!outputImageName.empty())
     {
@@ -88,6 +102,7 @@ int main(int argc, const char* argv[])
     imshow("Input", img);
     imshow("Output", dst);
     imshow("Tilde Output", tilde_dst);
+    imshow("NLM", nlm_dst);
     waitKey();
 
     return 0;
