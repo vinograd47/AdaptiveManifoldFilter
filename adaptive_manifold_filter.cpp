@@ -26,9 +26,14 @@ cv::AdaptiveManifoldFilter::AdaptiveManifoldFilter()
 
 namespace
 {
+    double Log2( double n )
+    {
+        return log(n) / log(2.0);
+    }
+
     int computeManifoldTreeHeight(double sigma_s, double sigma_r)
     {
-        const double Hs = floor(log2(sigma_s)) - 1.0;
+        const double Hs = floor(Log2(sigma_s)) - 1.0;
         const double Lr = 1.0 - sigma_r;
         return max(2, static_cast<int>(ceil(Hs * Lr)));
     }
@@ -171,7 +176,7 @@ namespace
 {
     double floor_to_power_of_two(double r)
     {
-        return pow(2.0, floor(log2(r)));
+        return pow(2.0, floor(Log2(r)));
     }
 
     Mat_<double> channelsSum(const Mat_<Point3d>& src)
