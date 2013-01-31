@@ -39,7 +39,7 @@ namespace
     }
 
     template <typename T>
-    Mat_<T> h_filter_horizontal(const Mat_<T>& src, double sigma)
+    Mat_<T> h_filter(const Mat_<T>& src, double sigma)
     {
         CV_Assert( src.depth() == CV_64F );
 
@@ -49,30 +49,33 @@ namespace
 
         for (int y = 0; y < src.rows; ++y)
         {
-            const T* src_row = src[y];
-            T* dst_row = dst[y];
-
             for (int x = 1; x < src.cols; ++x)
             {
-                dst_row[x] = src_row[x] + a * (src_row[x - 1] - src_row[x]);
+                dst(y, x) = src(y, x) + a * (src(y, x - 1) - src(y, x));
             }
 
             for (int x = src.cols - 2; x >= 0; --x)
             {
-                dst_row[x] = dst_row[x] + a * (dst_row[x + 1] - dst_row[x]);
+                dst(y, x) = dst(y, x) + a * (dst(y, x + 1) - dst(y, x));
+            }
+        }
+
+        for (int y = 1; y < src.rows; ++y)
+        {
+            for (int x = 0; x < src.cols; ++x)
+            {
+                dst(y, x) = dst(y, x) + a * (dst(y - 1, x) - dst(y, x));
+            }
+        }
+        for (int y = src.rows - 2; y >= 0; --y)
+        {
+            for (int x = 0; x < src.cols; ++x)
+            {
+                dst(y, x) = dst(y, x) + a * (dst(y + 1, x) - dst(y, x));
             }
         }
 
         return dst;
-    }
-
-    template <typename T>
-    Mat_<T> h_filter(const Mat_<T> src, double sigma)
-    {
-        Mat_<T> dst = h_filter_horizontal(src, sigma);
-        dst = dst.t();
-        dst = h_filter_horizontal(dst, sigma);
-        return dst.t();
     }
 
     template <typename T>
@@ -85,13 +88,9 @@ namespace
 
         for (int y = 0; y < a.rows; ++y)
         {
-            const T* a_row = a[y];
-            const double* b_row = b[y];
-            T* dst_row = dst[y];
-
             for (int x = 0; x < a.cols; ++x)
             {
-                dst_row[x] = a_row[x] * (1.0 / b_row[x]);
+                dst(y, x) = a(y, x) * (1.0 / b(y, x));
             }
         }
 
@@ -108,13 +107,9 @@ namespace
 
         for (int y = 0; y < a.rows; ++y)
         {
-            const T* a_row = a[y];
-            const double* b_row = b[y];
-            T* dst_row = dst[y];
-
             for (int x = 0; x < a.cols; ++x)
             {
-                dst_row[x] = a_row[x] * b_row[x];
+                dst(y, x) = a(y, x) * b(y, x);
             }
         }
 
@@ -181,17 +176,14 @@ namespace
 
     Mat_<double> channelsSum(const Mat_<Point3d>& src)
     {
-        Mat_<double> dst(src.size(), 0.0);
+        Mat_<double> dst(src.size());
 
         for (int y = 0; y < src.rows; ++y)
         {
-            const Point3d* src_row = src[y];
-            double* dst_row = dst[y];
-
             for (int x = 0; x < src.cols; ++x)
             {
-                Point3d src_val = src_row[x];
-                dst_row[x] = src_val.x + src_val.y + src_val.z;
+                const Point3d src_val = src(y, x);
+                dst(y, x) = src_val.x + src_val.y + src_val.z;
             }
         }
 
@@ -204,14 +196,9 @@ namespace
 
         for (int y = 0; y < dst.rows; ++y)
         {
-            const double* src_row = src[y];
-            double* dst_row = dst[y];
-
             for (int x = 0; x < dst.cols; ++x)
             {
-                double src_val = src_row[x];
-                double dst_val = exp(-0.5 * src_val / sigma / sigma);
-                dst_row[x] = dst_val;
+                dst(y, x) = exp(-0.5 * src(y, x) / sigma / sigma);
             }
         }
 
@@ -225,16 +212,11 @@ namespace
 
         for (int y = 0; y < a.rows; ++y)
         {
-            const Point3d* a_row = a[y];
-            const double* b_row = b[y];
-            Vec4d* dst_row = dst[y];
-
             for (int x = 0; x < a.cols; ++x)
             {
-                Point3d a_val = a_row[x];
-                double b_val = b_row[x];
-
-                dst_row[x] = Vec4d(a_val.x, a_val.y, a_val.z, b_val);
+                const Point3d a_val = a(y, x);
+                const double b_val = b(y, x);
+                dst(y, x) = Vec4d(a_val.x, a_val.y, a_val.z, b_val);
             }
         }
 
@@ -247,13 +229,9 @@ namespace
 
         for (int y = 0; y < src.rows - 1; ++y)
         {
-            const Point3d* src_cur_row = src[y];
-            const Point3d* src_next_row = src[y + 1];
-            Point3d* dst_row = dst[y];
-
             for (int x = 0; x < src.cols; ++x)
             {
-                dst_row[x] = src_next_row[x] - src_cur_row[x];
+                dst(y, x) = src(y + 1, x) - src(y, x);
             }
         }
 
@@ -266,12 +244,9 @@ namespace
 
         for (int y = 0; y < src.rows; ++y)
         {
-            const Point3d* src_row = src[y];
-            Point3d* dst_row = dst[y];
-
             for (int x = 0; x < src.cols - 1; ++x)
             {
-                dst_row[x] = src_row[x + 1] - src_row[x];
+                dst(y, x) = src(y, x + 1) - src(y, x);
             }
         }
 
@@ -289,50 +264,43 @@ namespace
         Mat_<double> V(D.size());
         for (int y = 0; y < D.rows; ++y)
         {
-            const double* D_row = D[y];
-            double* V_row = V[y];
-
             for (int x = 0; x < D.cols; ++x)
             {
-                V_row[x] = pow(a, D_row[x]);
+                V(y, x) = pow(a, D(y, x));
             }
         }
 
         for (int y = 0; y < I.rows; ++y)
         {
-            const double* V_row = V[y];
-            Vec4d* F_row = F[y];
-
             for (int x = 1; x < I.cols; ++x)
             {
-                Vec4d F_prev_val = F_row[x - 1];
-                Vec4d F_cur_val = F_row[x];
+                Vec4d F_cur_val = F(y, x);
+                const Vec4d F_prev_val = F(y, x - 1);
+                const double V_val = V(y, x);
 
-                F_cur_val[0] += V_row[x] * (F_prev_val[0] - F_cur_val[0]);
-                F_cur_val[1] += V_row[x] * (F_prev_val[1] - F_cur_val[1]);
-                F_cur_val[2] += V_row[x] * (F_prev_val[2] - F_cur_val[2]);
-                F_cur_val[3] += V_row[x] * (F_prev_val[3] - F_cur_val[3]);
+                F_cur_val[0] += V_val * (F_prev_val[0] - F_cur_val[0]);
+                F_cur_val[1] += V_val * (F_prev_val[1] - F_cur_val[1]);
+                F_cur_val[2] += V_val * (F_prev_val[2] - F_cur_val[2]);
+                F_cur_val[3] += V_val * (F_prev_val[3] - F_cur_val[3]);
 
-                F_row[x] = F_cur_val;
+                F(y, x) = F_cur_val;
             }
         }
 
         for (int y = 0; y < I.rows; ++y)
         {
-            const double* V_row = V[y];
-            Vec4d* F_row = F[y];
-
             for (int x = I.cols - 2; x >= 0; --x)
             {
-                Vec4d F_prev_val = F_row[x + 1];
-                Vec4d F_cur_val = F_row[x];
+                Vec4d F_cur_val = F(y, x);
+                const Vec4d F_prev_val = F(y, x + 1);
+                const double V_val = V(y, x);
 
-                F_cur_val[0] += V_row[x] * (F_prev_val[0] - F_cur_val[0]);
-                F_cur_val[1] += V_row[x] * (F_prev_val[1] - F_cur_val[1]);
-                F_cur_val[2] += V_row[x] * (F_prev_val[2] - F_cur_val[2]);
-                F_cur_val[3] += V_row[x] * (F_prev_val[3] - F_cur_val[3]);
+                F_cur_val[0] += V_val * (F_prev_val[0] - F_cur_val[0]);
+                F_cur_val[1] += V_val * (F_prev_val[1] - F_cur_val[1]);
+                F_cur_val[2] += V_val * (F_prev_val[2] - F_cur_val[2]);
+                F_cur_val[3] += V_val * (F_prev_val[3] - F_cur_val[3]);
 
-                F_row[x] = F_cur_val;
+                F(y, x) = F_cur_val;
             }
         }
 
