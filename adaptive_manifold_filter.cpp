@@ -420,7 +420,7 @@ namespace
 
     void RF_filter(const Mat_<Vec4f>& src, const Mat_<Point3f>& src_joint, Mat_<Vec4f>& dst, float sigma_s, float sigma_r, Buf& buf)
     {
-        CV_Assert( src_joint.size() == src.size() );
+        CV_DbgAssert( src_joint.size() == src.size() );
 
         diffX(src_joint, buf.dIcdx);
         diffY(src_joint, buf.dIcdy);
@@ -488,9 +488,9 @@ namespace
 
     void computeEigenVector(const Mat_<float>& X, const Mat_<uchar>& mask, Mat_<float>& dst, int num_pca_iterations, const Mat_<float>& rand_vec, Buf& buf)
     {
-        CV_Assert( X.cols == rand_vec.cols );
-        CV_Assert( X.rows == mask.size().area() );
-        CV_Assert( rand_vec.rows == 1 );
+        CV_DbgAssert( X.cols == rand_vec.cols );
+        CV_DbgAssert( X.rows == mask.size().area() );
+        CV_DbgAssert( rand_vec.rows == 1 );
 
         ensureSizeIsEnough(rand_vec.size(), dst.type(), dst);
         rand_vec.copyTo(dst);
