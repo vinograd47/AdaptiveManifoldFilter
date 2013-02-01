@@ -7,6 +7,59 @@
 
 namespace cv
 {
+    struct Buf
+    {
+        Mat_<Point3f> eta_1;
+        Mat_<uchar> cluster_1;
+
+        Mat_<Point3f> tilde_dst;
+        Mat_<float> alpha;
+        Mat_<Point3f> diff;
+        Mat_<Point3f> dst;
+
+        Mat_<float> V;
+
+        Mat_<Point3f> dIcdx;
+        Mat_<Point3f> dIcdy;
+        Mat_<float> dIdx;
+        Mat_<float> dIdy;
+        Mat_<float> dHdx;
+        Mat_<float> dVdy;
+
+        Mat_<float> t;
+
+        Mat_<float> theta_masked;
+        Mat_<Point3f> mul;
+        Mat_<Point3f> numerator;
+        Mat_<float> denominator;
+        Mat_<Point3f> numerator_filtered;
+        Mat_<float> denominator_filtered;
+
+        Mat_<Point3f> X;
+        Mat_<Point3f> eta_k_small;
+        Mat_<Point3f> eta_k_big;
+        Mat_<Point3f> X_squared;
+        Mat_<float> pixel_dist_to_manifold_squared;
+        Mat_<float> gaussian_distance_weights;
+        Mat_<Point3f> Psi_splat;
+        Mat_<Vec4f> Psi_splat_joined;
+        Mat_<Vec4f> Psi_splat_joined_resized;
+        Mat_<Vec4f> blurred_projected_values;
+        Mat_<Point3f> w_ki_Psi_blur;
+        Mat_<float> w_ki_Psi_blur_0;
+        Mat_<Point3f> w_ki_Psi_blur_resized;
+        Mat_<float> w_ki_Psi_blur_0_resized;
+        Mat_<float> rand_vec;
+        Mat_<float> v1;
+        Mat_<float> Nx_v1_mult;
+        Mat_<float> theta;
+
+        std::vector<Mat_<Point3f> > eta_minus;
+        std::vector<Mat_<uchar> > cluster_minus;
+        std::vector<Mat_<Point3f> > eta_plus;
+        std::vector<Mat_<uchar> > cluster_plus;
+    };
+
     class AdaptiveManifoldFilter : public Algorithm
     {
     public:
@@ -31,6 +84,8 @@ namespace cv
 
     private:
         void buildManifoldsAndPerformFiltering(const Mat_<Point3f>& eta_k, const Mat_<uchar>& cluster_k, int current_tree_level);
+
+        Buf buf_;
 
         Mat_<Point3f> src_f_;
         Mat_<Point3f> src_joint_f_;

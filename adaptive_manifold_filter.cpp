@@ -38,82 +38,123 @@ namespace
         return max(2, static_cast<int>(ceil(Hs * Lr)));
     }
 
-    template <typename T>
-    Mat_<T> h_filter(const Mat_<T>& src, float sigma)
+    void ensureSizeIsEnough(int rows, int cols, int type, Mat& m)
     {
-        CV_Assert( src.depth() == CV_32F );
+        if (m.empty() || m.type() != type || m.data != m.datastart)
+            m.create(rows, cols, type);
+        else
+        {
+            const size_t esz = m.elemSize();
+            const ptrdiff_t delta2 = m.dataend - m.datastart;
+
+            const size_t minstep = m.cols * esz;
+
+            Size wholeSize;
+            wholeSize.height = std::max(static_cast<int>((delta2 - minstep) / m.step + 1), m.rows);
+            wholeSize.width = std::max(static_cast<int>((delta2 - m.step * (wholeSize.height - 1)) / esz), m.cols);
+
+            if (wholeSize.height < rows || wholeSize.width < cols)
+                m.create(rows, cols, type);
+            else
+            {
+                m.cols = cols;
+                m.rows = rows;
+            }
+        }
+    }
+
+    void ensureSizeIsEnough(Size size, int type, Mat& m)
+    {
+        ensureSizeIsEnough(size.height, size.width, type, m);
+    }
+
+    template <typename T>
+    void h_filter(const Mat_<T>& src, Mat_<T>& dst, float sigma)
+    {
+        CV_DbgAssert( src.depth() == CV_32F );
 
         const float a = exp(-sqrt(2.0f) / sigma);
 
-        Mat_<T> dst = src.clone();
+        ensureSizeIsEnough(src.size(), src.type(), dst);
+        src.copyTo(dst);
 
         for (int y = 0; y < src.rows; ++y)
         {
+            const T* src_row = src[y];
+            T* dst_row = dst[y];
+
             for (int x = 1; x < src.cols; ++x)
             {
-                dst(y, x) = src(y, x) + a * (src(y, x - 1) - src(y, x));
+                dst_row[x] = src_row[x] + a * (src_row[x - 1] - src_row[x]);
             }
-
             for (int x = src.cols - 2; x >= 0; --x)
             {
-                dst(y, x) = dst(y, x) + a * (dst(y, x + 1) - dst(y, x));
+                dst_row[x] = dst_row[x] + a * (dst_row[x + 1] - dst_row[x]);
             }
         }
 
         for (int y = 1; y < src.rows; ++y)
         {
+            T* dst_cur_row = dst[y];
+            T* dst_prev_row = dst[y - 1];
+
             for (int x = 0; x < src.cols; ++x)
             {
-                dst(y, x) = dst(y, x) + a * (dst(y - 1, x) - dst(y, x));
+                dst_cur_row[x] = dst_cur_row[x] + a * (dst_prev_row[x] - dst_cur_row[x]);
             }
         }
         for (int y = src.rows - 2; y >= 0; --y)
         {
+            T* dst_cur_row = dst[y];
+            T* dst_prev_row = dst[y + 1];
+
             for (int x = 0; x < src.cols; ++x)
             {
-                dst(y, x) = dst(y, x) + a * (dst(y + 1, x) - dst(y, x));
+                dst_cur_row[x] = dst_cur_row[x] + a * (dst_prev_row[x] - dst_cur_row[x]);
             }
         }
-
-        return dst;
     }
 
     template <typename T>
-    Mat_<T> rdivide(const Mat_<T>& a, const Mat_<float>& b)
+    void rdivide(const Mat_<T>& a, const Mat_<float>& b, Mat_<T>& dst)
     {
-        CV_Assert( a.depth() == CV_32F );
-        CV_Assert( a.size() == b.size() );
+        CV_DbgAssert( a.depth() == CV_32F );
+        CV_DbgAssert( a.size() == b.size() );
 
-        Mat_<T> dst(a.size());
+        ensureSizeIsEnough(a.size(), a.type(), dst);
 
         for (int y = 0; y < a.rows; ++y)
         {
+            const T* a_row = a[y];
+            const float* b_row = b[y];
+            T* dst_row = dst[y];
+
             for (int x = 0; x < a.cols; ++x)
             {
-                dst(y, x) = a(y, x) * (1.0f / b(y, x));
+                dst_row[x] = a_row[x] * (1.0f / b_row[x]);
             }
         }
-
-        return dst;
     }
 
     template <typename T>
-    Mat_<T> times(const Mat_<T>& a, const Mat_<float>& b)
+    void times(const Mat_<T>& a, const Mat_<float>& b, Mat_<T>& dst)
     {
-        CV_Assert( a.depth() == CV_32F );
-        CV_Assert( a.size() == b.size() );
+        CV_DbgAssert( a.depth() == CV_32F );
+        CV_DbgAssert( a.size() == b.size() );
 
-        Mat_<T> dst(a.size());
+        ensureSizeIsEnough(a.size(), a.type(), dst);
 
         for (int y = 0; y < a.rows; ++y)
         {
+            const T* a_row = a[y];
+            const float* b_row = b[y];
+            T* dst_row = dst[y];
+
             for (int x = 0; x < a.cols; ++x)
             {
-                dst(y, x) = a(y, x) * b(y, x);
+                dst_row[x] = a_row[x] * b_row[x];
             }
         }
-
-        return dst;
     }
 }
 
@@ -122,49 +163,61 @@ void cv::AdaptiveManifoldFilter::apply(InputArray src, OutputArray _dst, OutputA
     CV_Assert( src.type() == CV_8UC3 );
     CV_Assert( src_joint.empty() || (src_joint.type() == src.type() && src_joint.size() == src.size()) );
 
+    ensureSizeIsEnough(src.size(), src_f_.type(), src_f_);
     src.getMat().convertTo(src_f_, src_f_.type(), 1.0 / 255.0);
 
     // Use the center pixel as seed to random number generation.
     const Point3f centralPix = src_f_(src_f_.rows / 2, src_f_.cols / 2);
     rng_ = RNG(static_cast<uint64>(centralPix.ddot(centralPix) * numeric_limits<uint64>::max()));
 
-    sum_w_ki_Psi_blur_.create(src_f_.size());
+    ensureSizeIsEnough(src_f_.size(), sum_w_ki_Psi_blur_.type(), sum_w_ki_Psi_blur_);
     sum_w_ki_Psi_blur_.setTo(Scalar::all(0));
 
-    sum_w_ki_Psi_blur_0_.create(src_f_.size());
+    ensureSizeIsEnough(src_f_.size(), sum_w_ki_Psi_blur_0_.type(), sum_w_ki_Psi_blur_0_);
     sum_w_ki_Psi_blur_0_.setTo(Scalar::all(0));
 
-    min_pixel_dist_to_manifold_squared_.create(src_f_.size());
+    ensureSizeIsEnough(src_f_.size(), min_pixel_dist_to_manifold_squared_.type(), min_pixel_dist_to_manifold_squared_);
     min_pixel_dist_to_manifold_squared_.setTo(Scalar::all(numeric_limits<float>::max()));
 
     // If the tree_height was not specified, compute it using Eq. (10) of our paper.
     cur_tree_height_ = tree_height_ > 0 ? tree_height_ : computeManifoldTreeHeight(sigma_s_, sigma_r_);
 
     // If no joint signal was specified, use the original signal
+    ensureSizeIsEnough(src.size(), src_joint_f_.type(), src_joint_f_);
     if (src_joint.empty())
         src_f_.copyTo(src_joint_f_);
     else
         src_joint.getMat().convertTo(src_joint_f_, src_joint_f_.type(), 1.0 / 255.0);
 
     // Algorithm 1, Step 1: compute the first manifold by low-pass filtering.
-    const Mat_<Point3f> eta_1 = h_filter(src_joint_f_, static_cast<float>(sigma_s_));
-    const Mat_<uchar> cluster_1(src_f_.size(), 1);
+    h_filter(src_joint_f_, buf_.eta_1, static_cast<float>(sigma_s_));
 
-    buildManifoldsAndPerformFiltering(eta_1, cluster_1, 1);
+    ensureSizeIsEnough(src_f_.size(), buf_.cluster_1.type(), buf_.cluster_1);
+    buf_.cluster_1.setTo(Scalar::all(1));
+
+    buf_.eta_minus.resize(cur_tree_height_);
+    buf_.cluster_minus.resize(cur_tree_height_);
+    buf_.eta_plus.resize(cur_tree_height_);
+    buf_.cluster_plus.resize(cur_tree_height_);
+    buildManifoldsAndPerformFiltering(buf_.eta_1, buf_.cluster_1, 1);
 
     // Compute the filter response by normalized convolution -- Eq. (4)
-    const Mat_<Point3f> tilde_dst = rdivide(sum_w_ki_Psi_blur_, sum_w_ki_Psi_blur_0_);
+    rdivide(sum_w_ki_Psi_blur_, sum_w_ki_Psi_blur_0_, buf_.tilde_dst);
 
     // Adjust the filter response for outlier pixels -- Eq. (10)
-    Mat_<float> alpha;
-    exp(min_pixel_dist_to_manifold_squared_ * (-0.5 / sigma_r_ / sigma_r_), alpha);
+    ensureSizeIsEnough(src_f_.size(), buf_.alpha.type(), buf_.alpha);
+    exp(min_pixel_dist_to_manifold_squared_ * (-0.5 / sigma_r_ / sigma_r_), buf_.alpha);
 
-    const Mat_<Point3f> diff = tilde_dst - src_f_;
-    const Mat_<Point3f> dst = src_f_ + times(diff, alpha);
+    ensureSizeIsEnough(src_f_.size(), buf_.diff.type(), buf_.diff);
+    subtract(buf_.tilde_dst, src_f_, buf_.diff);
+    times(buf_.diff, buf_.alpha, buf_.diff);
 
-    dst.convertTo(_dst, CV_8U, 255.0);
+    ensureSizeIsEnough(src_f_.size(), buf_.dst.type(), buf_.dst);
+    add(src_f_, buf_.diff, buf_.dst);
+
+    buf_.dst.convertTo(_dst, CV_8U, 255.0);
     if (_tilde_dst.needed())
-        tilde_dst.convertTo(_tilde_dst, CV_8U, 255.0);
+        buf_.tilde_dst.convertTo(_tilde_dst, CV_8U, 255.0);
 }
 
 namespace
@@ -174,183 +227,243 @@ namespace
         return pow(2.0, floor(Log2(r)));
     }
 
-    Mat_<float> channelsSum(const Mat_<Point3f>& src)
+    void channelsSum(const Mat_<Point3f>& src, Mat_<float>& dst)
     {
-        Mat_<float> dst(src.size());
+        ensureSizeIsEnough(src.size(), dst.type(), dst);
 
         for (int y = 0; y < src.rows; ++y)
         {
+            const Point3f* src_row = src[y];
+            float* dst_row = dst[y];
+
             for (int x = 0; x < src.cols; ++x)
             {
-                const Point3f src_val = src(y, x);
-                dst(y, x) = src_val.x + src_val.y + src_val.z;
+                const Point3f src_val = src_row[x];
+                dst_row[x] = src_val.x + src_val.y + src_val.z;
             }
         }
-
-        return dst;
     }
 
-    Mat_<float> phi(const Mat_<float>& src, float sigma)
+    void phi(const Mat_<float>& src, Mat_<float>& dst, float sigma)
     {
-        Mat_<float> dst(src.size());
+        ensureSizeIsEnough(src.size(), dst.type(), dst);
 
         for (int y = 0; y < dst.rows; ++y)
         {
+            const float* src_row = src[y];
+            float* dst_row = dst[y];
+
             for (int x = 0; x < dst.cols; ++x)
             {
-                dst(y, x) = exp(-0.5f * src(y, x) / sigma / sigma);
+                dst_row[x] = exp(-0.5f * src_row[x] / sigma / sigma);
             }
         }
-
-        return dst;
     }
 
-    Mat_<Vec4f> catCn(const Mat_<Point3f>& a, const Mat_<float>& b)
+    void catCn(const Mat_<Point3f>& a, const Mat_<float>& b, Mat_<Vec4f>& dst)
     {
-        Mat_<Vec4f> dst(a.size());
-        CV_Assert( a.size() == b.size() );
+        ensureSizeIsEnough(a.size(), dst.type(), dst);
 
         for (int y = 0; y < a.rows; ++y)
         {
+            const Point3f* a_row = a[y];
+            const float* b_row = b[y];
+            Vec4f* dst_row = dst[y];
+
             for (int x = 0; x < a.cols; ++x)
             {
-                const Point3f a_val = a(y, x);
-                const float b_val = b(y, x);
-                dst(y, x) = Vec4f(a_val.x, a_val.y, a_val.z, b_val);
+                const Point3f a_val = a_row[x];
+                const float b_val = b_row[x];
+                dst_row[x] = Vec4f(a_val.x, a_val.y, a_val.z, b_val);
             }
         }
-
-        return dst;
     }
 
-    Mat_<Point3f> diffY(const Mat_<Point3f>& src)
+    void diffY(const Mat_<Point3f>& src, Mat_<Point3f>& dst)
     {
-        Mat_<Point3f> dst(src.rows - 1, src.cols);
+        ensureSizeIsEnough(src.rows - 1, src.cols, dst.type(), dst);
 
         for (int y = 0; y < src.rows - 1; ++y)
         {
+            const Point3f* src_cur_row = src[y];
+            const Point3f* src_next_row = src[y + 1];
+            Point3f* dst_row = dst[y];
+
             for (int x = 0; x < src.cols; ++x)
             {
-                dst(y, x) = src(y + 1, x) - src(y, x);
+                dst_row[x] = src_next_row[x] - src_cur_row[x];
             }
         }
-
-        return dst;
     }
 
-    Mat_<Point3f> diffX(const Mat_<Point3f>& src)
+    void diffX(const Mat_<Point3f>& src, Mat_<Point3f>& dst)
     {
-        Mat_<Point3f> dst(src.rows, src.cols - 1);
+        ensureSizeIsEnough(src.rows, src.cols - 1, dst.type(), dst);
 
         for (int y = 0; y < src.rows; ++y)
         {
+            const Point3f* src_row = src[y];
+            Point3f* dst_row = dst[y];
+
             for (int x = 0; x < src.cols - 1; ++x)
             {
-                dst(y, x) = src(y, x + 1) - src(y, x);
+                dst_row[x] = src_row[x + 1] - src_row[x];
             }
         }
-
-        return dst;
     }
 
-    Mat_<Vec4f> TransformedDomainRecursiveFilter_Horizontal(const Mat_<Vec4f>& I, const Mat_<float>& D, float sigma)
+    void TransformedDomainRecursiveFilter(const Mat_<Vec4f>& I, const Mat_<float>& DH, const Mat_<float>& DV, Mat_<Vec4f>& dst, float sigma, Buf& buf)
     {
-        CV_Assert( I.size() == D.size() );
+        CV_DbgAssert( I.size() == DH.size() );
 
         const float a = exp(-sqrt(2.0f) / sigma);
 
-        Mat_<Vec4f> F = I.clone();
+        ensureSizeIsEnough(I.size(), dst.type(), dst);
+        I.copyTo(dst);
 
-        Mat_<float> V(D.size());
-        for (int y = 0; y < D.rows; ++y)
+        ensureSizeIsEnough(DH.size(), buf.V.type(), buf.V);
+
+        for (int y = 0; y < DH.rows; ++y)
         {
-            for (int x = 0; x < D.cols; ++x)
+            const float* D_row = DH[y];
+            float* V_row = buf.V[y];
+
+            for (int x = 0; x < DH.cols; ++x)
             {
-                V(y, x) = pow(a, D(y, x));
+                V_row[x] = pow(a, D_row[x]);
             }
         }
-
         for (int y = 0; y < I.rows; ++y)
         {
+            const float* V_row = buf.V[y];
+            Vec4f* dst_row = dst[y];
+
             for (int x = 1; x < I.cols; ++x)
             {
-                Vec4f F_cur_val = F(y, x);
-                const Vec4f F_prev_val = F(y, x - 1);
-                const float V_val = V(y, x);
+                Vec4f dst_cur_val = dst_row[x];
+                const Vec4f dst_prev_val = dst_row[x - 1];
+                const float V_val = V_row[x];
 
-                F_cur_val[0] += V_val * (F_prev_val[0] - F_cur_val[0]);
-                F_cur_val[1] += V_val * (F_prev_val[1] - F_cur_val[1]);
-                F_cur_val[2] += V_val * (F_prev_val[2] - F_cur_val[2]);
-                F_cur_val[3] += V_val * (F_prev_val[3] - F_cur_val[3]);
+                dst_cur_val[0] += V_val * (dst_prev_val[0] - dst_cur_val[0]);
+                dst_cur_val[1] += V_val * (dst_prev_val[1] - dst_cur_val[1]);
+                dst_cur_val[2] += V_val * (dst_prev_val[2] - dst_cur_val[2]);
+                dst_cur_val[3] += V_val * (dst_prev_val[3] - dst_cur_val[3]);
 
-                F(y, x) = F_cur_val;
+                dst_row[x] = dst_cur_val;
             }
-        }
-
-        for (int y = 0; y < I.rows; ++y)
-        {
             for (int x = I.cols - 2; x >= 0; --x)
             {
-                Vec4f F_cur_val = F(y, x);
-                const Vec4f F_prev_val = F(y, x + 1);
-                const float V_val = V(y, x);
+                Vec4f dst_cur_val = dst_row[x];
+                const Vec4f dst_prev_val = dst_row[x + 1];
+                const float V_val = V_row[x];
 
-                F_cur_val[0] += V_val * (F_prev_val[0] - F_cur_val[0]);
-                F_cur_val[1] += V_val * (F_prev_val[1] - F_cur_val[1]);
-                F_cur_val[2] += V_val * (F_prev_val[2] - F_cur_val[2]);
-                F_cur_val[3] += V_val * (F_prev_val[3] - F_cur_val[3]);
+                dst_cur_val[0] += V_val * (dst_prev_val[0] - dst_cur_val[0]);
+                dst_cur_val[1] += V_val * (dst_prev_val[1] - dst_cur_val[1]);
+                dst_cur_val[2] += V_val * (dst_prev_val[2] - dst_cur_val[2]);
+                dst_cur_val[3] += V_val * (dst_prev_val[3] - dst_cur_val[3]);
 
-                F(y, x) = F_cur_val;
+                dst_row[x] = dst_cur_val;
             }
         }
 
-        return F;
+        for (int y = 0; y < DV.rows; ++y)
+        {
+            const float* D_row = DV[y];
+            float* V_row = buf.V[y];
+
+            for (int x = 0; x < DV.cols; ++x)
+            {
+                V_row[x] = pow(a, D_row[x]);
+            }
+        }
+        for (int y = 1; y < I.rows; ++y)
+        {
+            const float* V_row = buf.V[y];
+            Vec4f* dst_cur_row = dst[y];
+            Vec4f* dst_prev_row = dst[y - 1];
+
+            for (int x = 0; x < I.cols; ++x)
+            {
+                Vec4f dst_cur_val = dst_cur_row[x];
+                const Vec4f dst_prev_val = dst_prev_row[x];
+                const float V_val = V_row[x];
+
+                dst_cur_val[0] += V_val * (dst_prev_val[0] - dst_cur_val[0]);
+                dst_cur_val[1] += V_val * (dst_prev_val[1] - dst_cur_val[1]);
+                dst_cur_val[2] += V_val * (dst_prev_val[2] - dst_cur_val[2]);
+                dst_cur_val[3] += V_val * (dst_prev_val[3] - dst_cur_val[3]);
+
+                dst_cur_row[x] = dst_cur_val;
+            }
+        }
+        for (int y = I.rows - 2; y >= 0; --y)
+        {
+            const float* V_row = buf.V[y];
+            Vec4f* dst_cur_row = dst[y];
+            Vec4f* dst_prev_row = dst[y + 1];
+
+            for (int x = 0; x < I.cols; ++x)
+            {
+                Vec4f dst_cur_val = dst_cur_row[x];
+                const Vec4f dst_prev_val = dst_prev_row[x];
+                const float V_val = V_row[x];
+
+                dst_cur_val[0] += V_val * (dst_prev_val[0] - dst_cur_val[0]);
+                dst_cur_val[1] += V_val * (dst_prev_val[1] - dst_cur_val[1]);
+                dst_cur_val[2] += V_val * (dst_prev_val[2] - dst_cur_val[2]);
+                dst_cur_val[3] += V_val * (dst_prev_val[3] - dst_cur_val[3]);
+
+                dst_cur_row[x] = dst_cur_val;
+            }
+        }
     }
 
-    Mat_<Vec4f> RF_filter(const Mat_<Vec4f>& src, const Mat_<Point3f>& src_joint, float sigma_s, float sigma_r)
+    void RF_filter(const Mat_<Vec4f>& src, const Mat_<Point3f>& src_joint, Mat_<Vec4f>& dst, float sigma_s, float sigma_r, Buf& buf)
     {
         CV_Assert( src_joint.size() == src.size() );
 
-        const Mat_<Point3f> dIcdx = diffX(src_joint);
-        const Mat_<Point3f> dIcdy = diffY(src_joint);
+        diffX(src_joint, buf.dIcdx);
+        diffY(src_joint, buf.dIcdy);
 
-        Mat_<float> dIdx(src.size());
-        Mat_<float> dIdy(src.size());
+        ensureSizeIsEnough(src.size(), buf.dIdx.type(), buf.dIdx);
+        buf.dIdx.setTo(Scalar::all(0));
         for (int y = 0; y < src.rows; ++y)
         {
+            const Point3f* dIcdx_row = buf.dIcdx[y];
+            float* dIdx_row = buf.dIdx[y];
+
             for (int x = 1; x < src.cols; ++x)
             {
-                const Point3f val = dIcdx(y, x - 1);
-                dIdx.at<float>(y, x) = val.dot(val);
+                const Point3f val = dIcdx_row[x - 1];
+                dIdx_row[x] = val.dot(val);
             }
         }
+
+        ensureSizeIsEnough(src.size(), buf.dIdy.type(), buf.dIdy);
+        buf.dIdy.setTo(Scalar::all(0));
         for (int y = 1; y < src.rows; ++y)
         {
+            const Point3f* dIcdy_row = buf.dIcdy[y - 1];
+            float* dIdy_row = buf.dIdy[y];
+
             for (int x = 0; x < src.cols; ++x)
             {
-                const Point3f val = dIcdy(y - 1, x);
-                dIdy.at<float>(y, x) = val.dot(val);
+                const Point3f val = dIcdy_row[x];
+                dIdy_row[x] = val.dot(val);
             }
         }
 
-        Mat_<float> dHdx;
-        dIdx.convertTo(dHdx, dHdx.type(), (sigma_s / sigma_r) * (sigma_s / sigma_r), (sigma_s / sigma_s) * (sigma_s / sigma_s));
-        sqrt(dHdx, dHdx);
+        ensureSizeIsEnough(buf.dIdx.size(), buf.dHdx.type(), buf.dHdx);
+        buf.dIdx.convertTo(buf.dHdx, buf.dHdx.type(), (sigma_s / sigma_r) * (sigma_s / sigma_r), (sigma_s / sigma_s) * (sigma_s / sigma_s));
+        sqrt(buf.dHdx, buf.dHdx);
 
-        Mat_<float> dVdy;
-        dIdy.convertTo(dVdy, dVdy.type(), (sigma_s / sigma_r) * (sigma_s / sigma_r), (sigma_s / sigma_s) * (sigma_s / sigma_s));
-        sqrt(dVdy, dVdy);
-        dVdy = dVdy.t();
+        ensureSizeIsEnough(buf.dIdy.size(), buf.dVdy.type(), buf.dVdy);
+        buf.dIdy.convertTo(buf.dVdy, buf.dVdy.type(), (sigma_s / sigma_r) * (sigma_s / sigma_r), (sigma_s / sigma_s) * (sigma_s / sigma_s));
+        sqrt(buf.dVdy, buf.dVdy);
 
-        Mat_<Vec4f> F = src.clone();
-
-        F = TransformedDomainRecursiveFilter_Horizontal(F, dHdx, sigma_s);
-        F = F.t();
-
-        F = TransformedDomainRecursiveFilter_Horizontal(F, dVdy, sigma_s);
-        F = F.t();
-
-        return F;
+        ensureSizeIsEnough(src.size(), dst.type(), dst);
+        src.copyTo(dst);
+        TransformedDomainRecursiveFilter(src, buf.dHdx, buf.dVdy, dst, sigma_s, buf);
     }
 
     void split_3_1(const Mat_<Vec4f>& src, Mat_<Point3f>& dst1, Mat_<float>& dst2)
@@ -360,66 +473,93 @@ namespace
 
         for (int y = 0; y < src.rows; ++y)
         {
+            const Vec4f* src_row = src[y];
+            Point3f* dst1_row = dst1[y];
+            float* dst2_row = dst2[y];
+
             for (int x = 0; x < src.cols; ++x)
             {
-                Vec4f val = src(y, x);
-                dst1(y, x) = Point3f(val[0], val[1], val[2]);
-                dst2(y, x) = val[3];
+                Vec4f val = src_row[x];
+                dst1_row[x] = Point3f(val[0], val[1], val[2]);
+                dst2_row[x] = val[3];
             }
         }
     }
 
-    Mat_<float> computeEigenVector(const Mat_<float>& X, const Mat_<uchar>& mask, int num_pca_iterations, const Mat_<float>& rand_vec)
+    void computeEigenVector(const Mat_<float>& X, const Mat_<uchar>& mask, Mat_<float>& dst, int num_pca_iterations, const Mat_<float>& rand_vec, Buf& buf)
     {
         CV_Assert( X.cols == rand_vec.cols );
         CV_Assert( X.rows == mask.size().area() );
         CV_Assert( rand_vec.rows == 1 );
 
-        Mat_<float> p = rand_vec.clone();
+        ensureSizeIsEnough(rand_vec.size(), dst.type(), dst);
+        rand_vec.copyTo(dst);
+
+        ensureSizeIsEnough(X.size(), buf.t.type(), buf.t);
+
+        float* dst_row = dst[0];
 
         for (int i = 0; i < num_pca_iterations; ++i)
         {
-            Mat_<float> t(X.size(), 0.0f);
+            buf.t.setTo(Scalar::all(0));
 
-            for (int y = 0; y < mask.rows; ++y)
+            for (int y = 0, ind = 0; y < mask.rows; ++y)
             {
-                for (int x = 0; x < mask.cols; ++x)
+                const uchar* mask_row = mask[y];
+
+                for (int x = 0; x < mask.cols; ++x, ++ind)
                 {
-                    if (mask(y, x))
+                    if (mask_row[x])
                     {
-                        int ind = y * mask.cols + x;
+                        const float* X_row = X[ind];
+                        float* t_row = buf.t[ind];
 
                         float dots = 0.0;
                         for (int c = 0; c < X.cols; ++c)
-                            dots += p(0, c) * X(ind, c);
+                            dots += dst_row[c] * X_row[c];
 
                         for (int c = 0; c < X.cols; ++c)
-                            t(ind, c) = dots * X(ind, c);
+                            t_row[c] = dots * X_row[c];
                     }
                 }
             }
 
-            p.setTo(0.0);
+            dst.setTo(0.0);
             for (int i = 0; i < X.rows; ++i)
+            {
+                const float* t_row = buf.t[i];
+
                 for (int c = 0; c < X.cols; ++c)
-                    p(0, c) += t(i, c);
+                {
+                    dst_row[c] += t_row[c];
+                }
+            }
         }
 
-        return p / norm(p);
+        double n = norm(dst);
+        divide(dst, n, dst);
     }
 
-    Mat_<Point3f> calcEta(const Mat_<Point3f>& src_joint_f, const Mat_<float>& theta, const Mat_<uchar>& cluster, float sigma_s, float df)
+    void calcEta(const Mat_<Point3f>& src_joint_f, const Mat_<float>& theta, const Mat_<uchar>& cluster, Mat_<Point3f>& dst, float sigma_s, float df, Buf& buf)
     {
-        Mat_<float> theta_masked(theta.size(), 0.0f);
-        theta.copyTo(theta_masked, cluster);
+        ensureSizeIsEnough(theta.size(), buf.theta_masked.type(), buf.theta_masked);
+        buf.theta_masked.setTo(Scalar::all(0));
+        theta.copyTo(buf.theta_masked, cluster);
 
-        Mat_<Point3f> numerator;
-        resize(times(src_joint_f, theta_masked), numerator, Size(), 1.0 / df, 1.0 / df);
+        times(src_joint_f, buf.theta_masked, buf.mul);
 
-        Mat_<float> denominator;
-        resize(theta_masked, denominator, Size(), 1.0 / df, 1.0 / df);
+        const Size nsz = Size(saturate_cast<int>(buf.mul.cols * (1.0 / df)), saturate_cast<int>(buf.mul.rows * (1.0 / df)));
 
-        return rdivide(h_filter(numerator, sigma_s / df), h_filter(denominator, sigma_s / df));
+        ensureSizeIsEnough(nsz, buf.numerator.type(), buf.numerator);
+        resize(buf.mul, buf.numerator, Size(), 1.0 / df, 1.0 / df);
+
+        ensureSizeIsEnough(nsz, buf.denominator.type(), buf.denominator);
+        resize(buf.theta_masked, buf.denominator, Size(), 1.0 / df, 1.0 / df);
+
+        h_filter(buf.numerator, buf.numerator_filtered, sigma_s / df);
+        h_filter(buf.denominator, buf.denominator_filtered, sigma_s / df);
+
+        rdivide(buf.numerator_filtered, buf.denominator_filtered, dst);
     }
 }
 
@@ -437,99 +577,116 @@ void cv::AdaptiveManifoldFilter::buildManifoldsAndPerformFiltering(const Mat_<Po
 
     // Splatting: project the pixel values onto the current manifold eta_k
 
-    Mat_<Point3f> X;
-    Mat_<Point3f> eta_k_small;
-
     if (eta_k.rows == src_joint_f_.rows)
     {
-        subtract(src_joint_f_, eta_k, X);
-        resize(eta_k, eta_k_small, Size(), 1.0 / df, 1.0 / df);
+        ensureSizeIsEnough(src_joint_f_.size(), buf_.X.type(), buf_.X);
+        subtract(src_joint_f_, eta_k, buf_.X);
+
+        const Size nsz = Size(saturate_cast<int>(eta_k.cols * (1.0 / df)), saturate_cast<int>(eta_k.rows * (1.0 / df)));
+        ensureSizeIsEnough(nsz, buf_.eta_k_small.type(), buf_.eta_k_small);
+        resize(eta_k, buf_.eta_k_small, Size(), 1.0 / df, 1.0 / df);
     }
     else
     {
-        eta_k_small = eta_k;
-        Mat_<Point3f> eta_k_big;
-        resize(eta_k, eta_k_big, src_joint_f_.size());
-        subtract(src_joint_f_, eta_k_big, X);
+        ensureSizeIsEnough(eta_k.size(), buf_.eta_k_small.type(), buf_.eta_k_small);
+        eta_k.copyTo(buf_.eta_k_small);
+
+        ensureSizeIsEnough(src_joint_f_.size(), buf_.eta_k_big.type(), buf_.eta_k_big);
+        resize(eta_k, buf_.eta_k_big, src_joint_f_.size());
+
+        ensureSizeIsEnough(src_joint_f_.size(), buf_.X.type(), buf_.X);
+        subtract(src_joint_f_, buf_.eta_k_big, buf_.X);
     }
 
     // Project pixel colors onto the manifold -- Eq. (3), Eq. (5)
 
-    Mat_<Point3f> X_squared;
-    multiply(X, X, X_squared);
-    const Mat_<float> pixel_dist_to_manifold_squared = channelsSum(X_squared);
+    ensureSizeIsEnough(buf_.X.size(), buf_.X_squared.type(), buf_.X_squared);
+    multiply(buf_.X, buf_.X, buf_.X_squared);
 
-    const Mat_<float> gaussian_distance_weights = phi(pixel_dist_to_manifold_squared, sigma_r_over_sqrt_2);
+    channelsSum(buf_.X_squared, buf_.pixel_dist_to_manifold_squared);
 
-    const Mat_<Point3f> Psi_splat = times(src_f_, gaussian_distance_weights);
-    const Mat_<float> Psi_splat_0 = gaussian_distance_weights;
+    phi(buf_.pixel_dist_to_manifold_squared, buf_.gaussian_distance_weights, sigma_r_over_sqrt_2);
+
+    times(src_f_, buf_.gaussian_distance_weights, buf_.Psi_splat);
+
+    const Mat_<float>& Psi_splat_0 = buf_.gaussian_distance_weights;
 
     // Save min distance to later perform adjustment of outliers -- Eq. (10)
 
-    min(min_pixel_dist_to_manifold_squared_, pixel_dist_to_manifold_squared, min_pixel_dist_to_manifold_squared_);
+    min(min_pixel_dist_to_manifold_squared_, buf_.pixel_dist_to_manifold_squared, min_pixel_dist_to_manifold_squared_);
 
     // Blurring: perform filtering over the current manifold eta_k
 
-    const Mat_<Vec4f> Psi_splat_joined = catCn(Psi_splat, Psi_splat_0);
+    catCn(buf_.Psi_splat, Psi_splat_0, buf_.Psi_splat_joined);
 
-    Mat_<Vec4f> Psi_splat_joined_resized;
-    resize(Psi_splat_joined, Psi_splat_joined_resized, eta_k_small.size());
+    ensureSizeIsEnough(buf_.eta_k_small.size(), buf_.Psi_splat_joined_resized.type(), buf_.Psi_splat_joined_resized);
+    resize(buf_.Psi_splat_joined, buf_.Psi_splat_joined_resized, buf_.eta_k_small.size());
 
-    const Mat_<Vec4f> blurred_projected_values = RF_filter(Psi_splat_joined_resized, eta_k_small, static_cast<float>(sigma_s_ / df), sigma_r_over_sqrt_2);
+    RF_filter(buf_.Psi_splat_joined_resized, buf_.eta_k_small, buf_.blurred_projected_values, static_cast<float>(sigma_s_ / df), sigma_r_over_sqrt_2, buf_);
 
-    Mat_<Point3f> w_ki_Psi_blur;
-    Mat_<float> w_ki_Psi_blur_0;
-    split_3_1(blurred_projected_values, w_ki_Psi_blur, w_ki_Psi_blur_0);
+    split_3_1(buf_.blurred_projected_values, buf_.w_ki_Psi_blur, buf_.w_ki_Psi_blur_0);
 
     // Slicing: gather blurred values from the manifold
 
     // Since we perform splatting and slicing at the same points over the manifolds,
     // the interpolation weights are equal to the gaussian weights used for splatting.
 
-    const Mat_<float> w_ki = gaussian_distance_weights;
+    const Mat_<float>& w_ki = buf_.gaussian_distance_weights;
 
-    Mat_<Point3f> w_ki_Psi_blur_resized;
-    resize(w_ki_Psi_blur, w_ki_Psi_blur_resized, src_f_.size());
-    add(sum_w_ki_Psi_blur_, times(w_ki_Psi_blur_resized, w_ki), sum_w_ki_Psi_blur_);
+    ensureSizeIsEnough(src_f_.size(), buf_.w_ki_Psi_blur_resized.type(), buf_.w_ki_Psi_blur_resized);
+    resize(buf_.w_ki_Psi_blur, buf_.w_ki_Psi_blur_resized, src_f_.size());
+    times(buf_.w_ki_Psi_blur_resized, w_ki, buf_.w_ki_Psi_blur_resized);
+    add(sum_w_ki_Psi_blur_, buf_.w_ki_Psi_blur_resized, sum_w_ki_Psi_blur_);
 
-    Mat_<float> w_ki_Psi_blur_0_resized;
-    resize(w_ki_Psi_blur_0, w_ki_Psi_blur_0_resized, src_f_.size());
-    add(sum_w_ki_Psi_blur_0_, times(w_ki_Psi_blur_0_resized, w_ki), sum_w_ki_Psi_blur_0_);
+    ensureSizeIsEnough(src_f_.size(), buf_.w_ki_Psi_blur_0_resized.type(), buf_.w_ki_Psi_blur_0_resized);
+    resize(buf_.w_ki_Psi_blur_0, buf_.w_ki_Psi_blur_0_resized, src_f_.size());
+    times(buf_.w_ki_Psi_blur_0_resized, w_ki, buf_.w_ki_Psi_blur_0_resized);
+    add(sum_w_ki_Psi_blur_0_, buf_.w_ki_Psi_blur_0_resized, sum_w_ki_Psi_blur_0_);
 
     // Compute two new manifolds eta_minus and eta_plus
 
     if (current_tree_level < cur_tree_height_)
     {
         // Algorithm 1, Step 2: compute the eigenvector v1
-        const Mat_<float> nX(src_joint_f_.size().area(), 3, (float*) X.data);
+        const Mat_<float> nX(src_joint_f_.size().area(), 3, (float*) buf_.X.data);
 
-        Mat_<float> rand_vec(1, nX.cols);
-        rng_.fill(rand_vec, RNG::UNIFORM, -0.5, 0.5);
+        ensureSizeIsEnough(1, nX.cols, buf_.rand_vec.type(), buf_.rand_vec);
+        rng_.fill(buf_.rand_vec, RNG::UNIFORM, -0.5, 0.5);
 
-        Mat_<float> v1 = computeEigenVector(nX, cluster_k, num_pca_iterations_, rand_vec);
-        v1 = v1.t();
+        computeEigenVector(nX, cluster_k, buf_.v1, num_pca_iterations_, buf_.rand_vec, buf_);
 
         // Algorithm 1, Step 3: Segment pixels into two clusters -- Eq. (6)
 
-        Mat_<float> Nx_v1_mult;
-        gemm(nX, v1, 1.0, noArray(), 0.0, Nx_v1_mult);
+        ensureSizeIsEnough(nX.rows, buf_.v1.rows, buf_.Nx_v1_mult.type(), buf_.Nx_v1_mult);
+        gemm(nX, buf_.v1, 1.0, noArray(), 0.0, buf_.Nx_v1_mult, GEMM_2_T);
 
-        const Mat_<float> dot(src_joint_f_.rows, src_joint_f_.cols, (float*) Nx_v1_mult.data);
+        const Mat_<float> dot(src_joint_f_.rows, src_joint_f_.cols, (float*) buf_.Nx_v1_mult.data);
 
-        const Mat_<uchar> cluster_minus = (dot <  0) & cluster_k;
-        const Mat_<uchar> cluster_plus  = (dot >= 0) & cluster_k;
+        Mat_<uchar>& cluster_minus = buf_.cluster_minus[current_tree_level];
+        ensureSizeIsEnough(dot.size(), cluster_minus.type(), cluster_minus);
+        compare(dot, 0, cluster_minus, CMP_LT);
+        bitwise_and(cluster_minus, cluster_k, cluster_minus);
+
+        Mat_<uchar>& cluster_plus = buf_.cluster_plus[current_tree_level];
+        ensureSizeIsEnough(dot.size(), cluster_plus.type(), cluster_plus);
+        compare(dot, 0, cluster_plus, CMP_GT);
+        bitwise_and(cluster_plus, cluster_k, cluster_plus);
 
         // Algorithm 1, Step 4: Compute new manifolds by weighted low-pass filtering -- Eq. (7-8)
 
-        const Mat_<float> theta = Mat::ones(w_ki.size(), w_ki.type()) - w_ki;
+        ensureSizeIsEnough(w_ki.size(), buf_.theta.type(), buf_.theta);
+        buf_.theta.setTo(Scalar::all(1.0));
+        subtract(buf_.theta, w_ki, buf_.theta);
 
-        Mat_<Point3f> eta_minus = calcEta(src_joint_f_, theta, cluster_minus, sigma_s_, df);
-        Mat_<Point3f> eta_plus = calcEta(src_joint_f_, theta, cluster_plus, sigma_s_, df);
+        Mat_<Point3f>& eta_minus = buf_.eta_minus[current_tree_level];
+        calcEta(src_joint_f_, buf_.theta, cluster_minus, eta_minus, sigma_s_, df, buf_);
+
+        Mat_<Point3f>& eta_plus = buf_.eta_plus[current_tree_level];
+        calcEta(src_joint_f_, buf_.theta, cluster_plus, eta_plus, sigma_s_, df, buf_);
 
         // Algorithm 1, Step 5: recursively build more manifolds.
 
         buildManifoldsAndPerformFiltering(eta_minus, cluster_minus, current_tree_level + 1);
-
         buildManifoldsAndPerformFiltering(eta_plus, cluster_plus, current_tree_level + 1);
     }
 }
