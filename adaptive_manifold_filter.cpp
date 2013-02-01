@@ -26,7 +26,7 @@ cv::AdaptiveManifoldFilter::AdaptiveManifoldFilter()
 
 namespace
 {
-    double Log2( double n )
+    double Log2(double n)
     {
         return log(n) / log(2.0);
     }
@@ -39,11 +39,11 @@ namespace
     }
 
     template <typename T>
-    Mat_<T> h_filter(const Mat_<T>& src, double sigma)
+    Mat_<T> h_filter(const Mat_<T>& src, float sigma)
     {
-        CV_Assert( src.depth() == CV_64F );
+        CV_Assert( src.depth() == CV_32F );
 
-        const double a = exp(-sqrt(2.0) / sigma);
+        const float a = exp(-sqrt(2.0f) / sigma);
 
         Mat_<T> dst = src.clone();
 
@@ -79,9 +79,9 @@ namespace
     }
 
     template <typename T>
-    Mat_<T> rdivide(const Mat_<T>& a, const Mat_<double>& b)
+    Mat_<T> rdivide(const Mat_<T>& a, const Mat_<float>& b)
     {
-        CV_Assert( a.depth() == CV_64F );
+        CV_Assert( a.depth() == CV_32F );
         CV_Assert( a.size() == b.size() );
 
         Mat_<T> dst(a.size());
@@ -90,7 +90,7 @@ namespace
         {
             for (int x = 0; x < a.cols; ++x)
             {
-                dst(y, x) = a(y, x) * (1.0 / b(y, x));
+                dst(y, x) = a(y, x) * (1.0f / b(y, x));
             }
         }
 
@@ -98,9 +98,9 @@ namespace
     }
 
     template <typename T>
-    Mat_<T> times(const Mat_<T>& a, const Mat_<double>& b)
+    Mat_<T> times(const Mat_<T>& a, const Mat_<float>& b)
     {
-        CV_Assert( a.depth() == CV_64F );
+        CV_Assert( a.depth() == CV_32F );
         CV_Assert( a.size() == b.size() );
 
         Mat_<T> dst(a.size());
@@ -125,7 +125,7 @@ void cv::AdaptiveManifoldFilter::apply(InputArray src, OutputArray _dst, OutputA
     src.getMat().convertTo(src_f_, src_f_.type(), 1.0 / 255.0);
 
     // Use the center pixel as seed to random number generation.
-    const Point3d centralPix = src_f_(src_f_.rows / 2, src_f_.cols / 2);
+    const Point3f centralPix = src_f_(src_f_.rows / 2, src_f_.cols / 2);
     rng_ = RNG(static_cast<uint64>(centralPix.ddot(centralPix) * numeric_limits<uint64>::max()));
 
     sum_w_ki_Psi_blur_.create(src_f_.size());
@@ -135,7 +135,7 @@ void cv::AdaptiveManifoldFilter::apply(InputArray src, OutputArray _dst, OutputA
     sum_w_ki_Psi_blur_0_.setTo(Scalar::all(0));
 
     min_pixel_dist_to_manifold_squared_.create(src_f_.size());
-    min_pixel_dist_to_manifold_squared_.setTo(Scalar::all(numeric_limits<double>::max()));
+    min_pixel_dist_to_manifold_squared_.setTo(Scalar::all(numeric_limits<float>::max()));
 
     // If the tree_height was not specified, compute it using Eq. (10) of our paper.
     cur_tree_height_ = tree_height_ > 0 ? tree_height_ : computeManifoldTreeHeight(sigma_s_, sigma_r_);
@@ -144,23 +144,23 @@ void cv::AdaptiveManifoldFilter::apply(InputArray src, OutputArray _dst, OutputA
     if (src_joint.empty())
         src_f_.copyTo(src_joint_f_);
     else
-        src_joint.getMat().convertTo(src_joint_f_, CV_64F, 1.0 / 255.0);
+        src_joint.getMat().convertTo(src_joint_f_, src_joint_f_.type(), 1.0 / 255.0);
 
     // Algorithm 1, Step 1: compute the first manifold by low-pass filtering.
-    const Mat_<Point3d> eta_1 = h_filter(src_joint_f_, sigma_s_);
+    const Mat_<Point3f> eta_1 = h_filter(src_joint_f_, static_cast<float>(sigma_s_));
     const Mat_<uchar> cluster_1(src_f_.size(), 1);
 
     buildManifoldsAndPerformFiltering(eta_1, cluster_1, 1);
 
     // Compute the filter response by normalized convolution -- Eq. (4)
-    const Mat_<Point3d> tilde_dst = rdivide(sum_w_ki_Psi_blur_, sum_w_ki_Psi_blur_0_);
+    const Mat_<Point3f> tilde_dst = rdivide(sum_w_ki_Psi_blur_, sum_w_ki_Psi_blur_0_);
 
     // Adjust the filter response for outlier pixels -- Eq. (10)
-    Mat_<double> alpha;
+    Mat_<float> alpha;
     exp(min_pixel_dist_to_manifold_squared_ * (-0.5 / sigma_r_ / sigma_r_), alpha);
 
-    const Mat_<Point3d> diff = tilde_dst - src_f_;
-    const Mat_<Point3d> dst = src_f_ + times(diff, alpha);
+    const Mat_<Point3f> diff = tilde_dst - src_f_;
+    const Mat_<Point3f> dst = src_f_ + times(diff, alpha);
 
     dst.convertTo(_dst, CV_8U, 255.0);
     if (_tilde_dst.needed())
@@ -174,15 +174,15 @@ namespace
         return pow(2.0, floor(Log2(r)));
     }
 
-    Mat_<double> channelsSum(const Mat_<Point3d>& src)
+    Mat_<float> channelsSum(const Mat_<Point3f>& src)
     {
-        Mat_<double> dst(src.size());
+        Mat_<float> dst(src.size());
 
         for (int y = 0; y < src.rows; ++y)
         {
             for (int x = 0; x < src.cols; ++x)
             {
-                const Point3d src_val = src(y, x);
+                const Point3f src_val = src(y, x);
                 dst(y, x) = src_val.x + src_val.y + src_val.z;
             }
         }
@@ -190,42 +190,42 @@ namespace
         return dst;
     }
 
-    Mat_<double> phi(const Mat_<double>& src, double sigma)
+    Mat_<float> phi(const Mat_<float>& src, float sigma)
     {
-        Mat_<double> dst(src.size());
+        Mat_<float> dst(src.size());
 
         for (int y = 0; y < dst.rows; ++y)
         {
             for (int x = 0; x < dst.cols; ++x)
             {
-                dst(y, x) = exp(-0.5 * src(y, x) / sigma / sigma);
+                dst(y, x) = exp(-0.5f * src(y, x) / sigma / sigma);
             }
         }
 
         return dst;
     }
 
-    Mat_<Vec4d> catCn(const Mat_<Point3d>& a, const Mat_<double>& b)
+    Mat_<Vec4f> catCn(const Mat_<Point3f>& a, const Mat_<float>& b)
     {
-        Mat_<Vec4d> dst(a.size());
+        Mat_<Vec4f> dst(a.size());
         CV_Assert( a.size() == b.size() );
 
         for (int y = 0; y < a.rows; ++y)
         {
             for (int x = 0; x < a.cols; ++x)
             {
-                const Point3d a_val = a(y, x);
-                const double b_val = b(y, x);
-                dst(y, x) = Vec4d(a_val.x, a_val.y, a_val.z, b_val);
+                const Point3f a_val = a(y, x);
+                const float b_val = b(y, x);
+                dst(y, x) = Vec4f(a_val.x, a_val.y, a_val.z, b_val);
             }
         }
 
         return dst;
     }
 
-    Mat_<Point3d> diffY(const Mat_<Point3d>& src)
+    Mat_<Point3f> diffY(const Mat_<Point3f>& src)
     {
-        Mat_<Point3d> dst(src.rows - 1, src.cols);
+        Mat_<Point3f> dst(src.rows - 1, src.cols);
 
         for (int y = 0; y < src.rows - 1; ++y)
         {
@@ -238,9 +238,9 @@ namespace
         return dst;
     }
 
-    Mat_<Point3d> diffX(const Mat_<Point3d>& src)
+    Mat_<Point3f> diffX(const Mat_<Point3f>& src)
     {
-        Mat_<Point3d> dst(src.rows, src.cols - 1);
+        Mat_<Point3f> dst(src.rows, src.cols - 1);
 
         for (int y = 0; y < src.rows; ++y)
         {
@@ -253,15 +253,15 @@ namespace
         return dst;
     }
 
-    Mat_<Vec4d> TransformedDomainRecursiveFilter_Horizontal(const Mat_<Vec4d>& I, const Mat_<double>& D, double sigma)
+    Mat_<Vec4f> TransformedDomainRecursiveFilter_Horizontal(const Mat_<Vec4f>& I, const Mat_<float>& D, float sigma)
     {
         CV_Assert( I.size() == D.size() );
 
-        const double a = exp(-sqrt(2.0) / sigma);
+        const float a = exp(-sqrt(2.0f) / sigma);
 
-        Mat_<Vec4d> F = I.clone();
+        Mat_<Vec4f> F = I.clone();
 
-        Mat_<double> V(D.size());
+        Mat_<float> V(D.size());
         for (int y = 0; y < D.rows; ++y)
         {
             for (int x = 0; x < D.cols; ++x)
@@ -274,9 +274,9 @@ namespace
         {
             for (int x = 1; x < I.cols; ++x)
             {
-                Vec4d F_cur_val = F(y, x);
-                const Vec4d F_prev_val = F(y, x - 1);
-                const double V_val = V(y, x);
+                Vec4f F_cur_val = F(y, x);
+                const Vec4f F_prev_val = F(y, x - 1);
+                const float V_val = V(y, x);
 
                 F_cur_val[0] += V_val * (F_prev_val[0] - F_cur_val[0]);
                 F_cur_val[1] += V_val * (F_prev_val[1] - F_cur_val[1]);
@@ -291,9 +291,9 @@ namespace
         {
             for (int x = I.cols - 2; x >= 0; --x)
             {
-                Vec4d F_cur_val = F(y, x);
-                const Vec4d F_prev_val = F(y, x + 1);
-                const double V_val = V(y, x);
+                Vec4f F_cur_val = F(y, x);
+                const Vec4f F_prev_val = F(y, x + 1);
+                const float V_val = V(y, x);
 
                 F_cur_val[0] += V_val * (F_prev_val[0] - F_cur_val[0]);
                 F_cur_val[1] += V_val * (F_prev_val[1] - F_cur_val[1]);
@@ -307,42 +307,42 @@ namespace
         return F;
     }
 
-    Mat_<Vec4d> RF_filter(const Mat_<Vec4d>& src, const Mat_<Point3d>& src_joint, double sigma_s, double sigma_r)
+    Mat_<Vec4f> RF_filter(const Mat_<Vec4f>& src, const Mat_<Point3f>& src_joint, float sigma_s, float sigma_r)
     {
         CV_Assert( src_joint.size() == src.size() );
 
-        const Mat_<Point3d> dIcdx = diffX(src_joint);
-        const Mat_<Point3d> dIcdy = diffY(src_joint);
+        const Mat_<Point3f> dIcdx = diffX(src_joint);
+        const Mat_<Point3f> dIcdy = diffY(src_joint);
 
-        Mat_<double> dIdx(src.size());
-        Mat_<double> dIdy(src.size());
+        Mat_<float> dIdx(src.size());
+        Mat_<float> dIdy(src.size());
         for (int y = 0; y < src.rows; ++y)
         {
             for (int x = 1; x < src.cols; ++x)
             {
-                const Point3d val = dIcdx(y, x - 1);
-                dIdx.at<double>(y, x) = val.ddot(val);
+                const Point3f val = dIcdx(y, x - 1);
+                dIdx.at<float>(y, x) = val.dot(val);
             }
         }
         for (int y = 1; y < src.rows; ++y)
         {
             for (int x = 0; x < src.cols; ++x)
             {
-                const Point3d val = dIcdy(y - 1, x);
-                dIdy.at<double>(y, x) = val.ddot(val);
+                const Point3f val = dIcdy(y - 1, x);
+                dIdy.at<float>(y, x) = val.dot(val);
             }
         }
 
-        Mat_<double> dHdx;
+        Mat_<float> dHdx;
         dIdx.convertTo(dHdx, dHdx.type(), (sigma_s / sigma_r) * (sigma_s / sigma_r), (sigma_s / sigma_s) * (sigma_s / sigma_s));
         sqrt(dHdx, dHdx);
 
-        Mat_<double> dVdy;
+        Mat_<float> dVdy;
         dIdy.convertTo(dVdy, dVdy.type(), (sigma_s / sigma_r) * (sigma_s / sigma_r), (sigma_s / sigma_s) * (sigma_s / sigma_s));
         sqrt(dVdy, dVdy);
         dVdy = dVdy.t();
 
-        Mat_<Vec4d> F = src.clone();
+        Mat_<Vec4f> F = src.clone();
 
         F = TransformedDomainRecursiveFilter_Horizontal(F, dHdx, sigma_s);
         F = F.t();
@@ -353,7 +353,7 @@ namespace
         return F;
     }
 
-    void split_3_1(const Mat_<Vec4d>& src, Mat_<Point3d>& dst1, Mat_<double>& dst2)
+    void split_3_1(const Mat_<Vec4f>& src, Mat_<Point3f>& dst1, Mat_<float>& dst2)
     {
         dst1.create(src.size());
         dst2.create(src.size());
@@ -362,24 +362,24 @@ namespace
         {
             for (int x = 0; x < src.cols; ++x)
             {
-                Vec4d val = src(y, x);
-                dst1(y, x) = Point3d(val[0], val[1], val[2]);
+                Vec4f val = src(y, x);
+                dst1(y, x) = Point3f(val[0], val[1], val[2]);
                 dst2(y, x) = val[3];
             }
         }
     }
 
-    Mat_<double> computeEigenVector(const Mat_<double>& X, const Mat_<uchar>& mask, int num_pca_iterations, const Mat_<double>& rand_vec)
+    Mat_<float> computeEigenVector(const Mat_<float>& X, const Mat_<uchar>& mask, int num_pca_iterations, const Mat_<float>& rand_vec)
     {
         CV_Assert( X.cols == rand_vec.cols );
         CV_Assert( X.rows == mask.size().area() );
         CV_Assert( rand_vec.rows == 1 );
 
-        Mat_<double> p = rand_vec.clone();
+        Mat_<float> p = rand_vec.clone();
 
         for (int i = 0; i < num_pca_iterations; ++i)
         {
-            Mat_<double> t(X.size(), 0.0);
+            Mat_<float> t(X.size(), 0.0f);
 
             for (int y = 0; y < mask.rows; ++y)
             {
@@ -389,7 +389,7 @@ namespace
                     {
                         int ind = y * mask.cols + x;
 
-                        double dots = 0.0;
+                        float dots = 0.0;
                         for (int c = 0; c < X.cols; ++c)
                             dots += p(0, c) * X(ind, c);
 
@@ -408,26 +408,26 @@ namespace
         return p / norm(p);
     }
 
-    Mat_<Point3d> calcEta(const Mat_<Point3d>& src_joint_f, const Mat_<double>& theta, const Mat_<uchar>& cluster, double sigma_s, double df)
+    Mat_<Point3f> calcEta(const Mat_<Point3f>& src_joint_f, const Mat_<float>& theta, const Mat_<uchar>& cluster, float sigma_s, float df)
     {
-        Mat_<double> theta_masked(theta.size(), 0.0);
+        Mat_<float> theta_masked(theta.size(), 0.0f);
         theta.copyTo(theta_masked, cluster);
 
-        Mat_<Point3d> numerator;
+        Mat_<Point3f> numerator;
         resize(times(src_joint_f, theta_masked), numerator, Size(), 1.0 / df, 1.0 / df);
 
-        Mat_<double> denominator;
+        Mat_<float> denominator;
         resize(theta_masked, denominator, Size(), 1.0 / df, 1.0 / df);
 
         return rdivide(h_filter(numerator, sigma_s / df), h_filter(denominator, sigma_s / df));
     }
 }
 
-void cv::AdaptiveManifoldFilter::buildManifoldsAndPerformFiltering(const Mat_<Point3d>& eta_k, const Mat_<uchar>& cluster_k, int current_tree_level)
+void cv::AdaptiveManifoldFilter::buildManifoldsAndPerformFiltering(const Mat_<Point3f>& eta_k, const Mat_<uchar>& cluster_k, int current_tree_level)
 {
     // Dividing the covariance matrix by 2 is equivalent to dividing the standard deviations by sqrt(2).
 
-    const double sigma_r_over_sqrt_2 = sigma_r_ / sqrt(2.0);
+    const float sigma_r_over_sqrt_2 = static_cast<float>(sigma_r_ / sqrt(2.0));
 
     // Compute downsampling factor
 
@@ -437,8 +437,8 @@ void cv::AdaptiveManifoldFilter::buildManifoldsAndPerformFiltering(const Mat_<Po
 
     // Splatting: project the pixel values onto the current manifold eta_k
 
-    Mat_<Point3d> X;
-    Mat_<Point3d> eta_k_small;
+    Mat_<Point3f> X;
+    Mat_<Point3f> eta_k_small;
 
     if (eta_k.rows == src_joint_f_.rows)
     {
@@ -448,21 +448,21 @@ void cv::AdaptiveManifoldFilter::buildManifoldsAndPerformFiltering(const Mat_<Po
     else
     {
         eta_k_small = eta_k;
-        Mat eta_k_big;
+        Mat_<Point3f> eta_k_big;
         resize(eta_k, eta_k_big, src_joint_f_.size());
         subtract(src_joint_f_, eta_k_big, X);
     }
 
     // Project pixel colors onto the manifold -- Eq. (3), Eq. (5)
 
-    Mat_<Point3d> X_squared;
+    Mat_<Point3f> X_squared;
     multiply(X, X, X_squared);
-    const Mat_<double> pixel_dist_to_manifold_squared = channelsSum(X_squared);
+    const Mat_<float> pixel_dist_to_manifold_squared = channelsSum(X_squared);
 
-    const Mat_<double> gaussian_distance_weights = phi(pixel_dist_to_manifold_squared, sigma_r_over_sqrt_2);
+    const Mat_<float> gaussian_distance_weights = phi(pixel_dist_to_manifold_squared, sigma_r_over_sqrt_2);
 
-    const Mat_<Point3d> Psi_splat = times(src_f_, gaussian_distance_weights);
-    const Mat_<double> Psi_splat_0 = gaussian_distance_weights;
+    const Mat_<Point3f> Psi_splat = times(src_f_, gaussian_distance_weights);
+    const Mat_<float> Psi_splat_0 = gaussian_distance_weights;
 
     // Save min distance to later perform adjustment of outliers -- Eq. (10)
 
@@ -470,15 +470,15 @@ void cv::AdaptiveManifoldFilter::buildManifoldsAndPerformFiltering(const Mat_<Po
 
     // Blurring: perform filtering over the current manifold eta_k
 
-    const Mat_<Vec4d> Psi_splat_joined = catCn(Psi_splat, Psi_splat_0);
+    const Mat_<Vec4f> Psi_splat_joined = catCn(Psi_splat, Psi_splat_0);
 
-    Mat_<Vec4d> Psi_splat_joined_resized;
+    Mat_<Vec4f> Psi_splat_joined_resized;
     resize(Psi_splat_joined, Psi_splat_joined_resized, eta_k_small.size());
 
-    const Mat_<Vec4d> blurred_projected_values = RF_filter(Psi_splat_joined_resized, eta_k_small, sigma_s_ / df, sigma_r_over_sqrt_2);
+    const Mat_<Vec4f> blurred_projected_values = RF_filter(Psi_splat_joined_resized, eta_k_small, static_cast<float>(sigma_s_ / df), sigma_r_over_sqrt_2);
 
-    Mat_<Point3d> w_ki_Psi_blur;
-    Mat_<double> w_ki_Psi_blur_0;
+    Mat_<Point3f> w_ki_Psi_blur;
+    Mat_<float> w_ki_Psi_blur_0;
     split_3_1(blurred_projected_values, w_ki_Psi_blur, w_ki_Psi_blur_0);
 
     // Slicing: gather blurred values from the manifold
@@ -486,13 +486,13 @@ void cv::AdaptiveManifoldFilter::buildManifoldsAndPerformFiltering(const Mat_<Po
     // Since we perform splatting and slicing at the same points over the manifolds,
     // the interpolation weights are equal to the gaussian weights used for splatting.
 
-    const Mat_<double> w_ki = gaussian_distance_weights;
+    const Mat_<float> w_ki = gaussian_distance_weights;
 
-    Mat_<Point3d> w_ki_Psi_blur_resized;
+    Mat_<Point3f> w_ki_Psi_blur_resized;
     resize(w_ki_Psi_blur, w_ki_Psi_blur_resized, src_f_.size());
     add(sum_w_ki_Psi_blur_, times(w_ki_Psi_blur_resized, w_ki), sum_w_ki_Psi_blur_);
 
-    Mat_<double> w_ki_Psi_blur_0_resized;
+    Mat_<float> w_ki_Psi_blur_0_resized;
     resize(w_ki_Psi_blur_0, w_ki_Psi_blur_0_resized, src_f_.size());
     add(sum_w_ki_Psi_blur_0_, times(w_ki_Psi_blur_0_resized, w_ki), sum_w_ki_Psi_blur_0_);
 
@@ -501,30 +501,30 @@ void cv::AdaptiveManifoldFilter::buildManifoldsAndPerformFiltering(const Mat_<Po
     if (current_tree_level < cur_tree_height_)
     {
         // Algorithm 1, Step 2: compute the eigenvector v1
-        const Mat_<double> nX(src_joint_f_.size().area(), 3, (double*) X.data);
+        const Mat_<float> nX(src_joint_f_.size().area(), 3, (float*) X.data);
 
-        Mat_<double> rand_vec(1, nX.cols);
+        Mat_<float> rand_vec(1, nX.cols);
         rng_.fill(rand_vec, RNG::UNIFORM, -0.5, 0.5);
 
-        Mat_<double> v1 = computeEigenVector(nX, cluster_k, num_pca_iterations_, rand_vec);
+        Mat_<float> v1 = computeEigenVector(nX, cluster_k, num_pca_iterations_, rand_vec);
         v1 = v1.t();
 
         // Algorithm 1, Step 3: Segment pixels into two clusters -- Eq. (6)
 
-        Mat_<double> Nx_v1_mult;
+        Mat_<float> Nx_v1_mult;
         gemm(nX, v1, 1.0, noArray(), 0.0, Nx_v1_mult);
 
-        const Mat_<double> dot(src_joint_f_.rows, src_joint_f_.cols, (double*) Nx_v1_mult.data);
+        const Mat_<float> dot(src_joint_f_.rows, src_joint_f_.cols, (float*) Nx_v1_mult.data);
 
         const Mat_<uchar> cluster_minus = (dot <  0) & cluster_k;
         const Mat_<uchar> cluster_plus  = (dot >= 0) & cluster_k;
 
         // Algorithm 1, Step 4: Compute new manifolds by weighted low-pass filtering -- Eq. (7-8)
 
-        const Mat_<double> theta = Mat::ones(w_ki.size(), w_ki.type()) - w_ki;
+        const Mat_<float> theta = Mat::ones(w_ki.size(), w_ki.type()) - w_ki;
 
-        Mat_<Point3d> eta_minus = calcEta(src_joint_f_, theta, cluster_minus, sigma_s_, df);
-        Mat_<Point3d> eta_plus = calcEta(src_joint_f_, theta, cluster_plus, sigma_s_, df);
+        Mat_<Point3f> eta_minus = calcEta(src_joint_f_, theta, cluster_minus, sigma_s_, df);
+        Mat_<Point3f> eta_plus = calcEta(src_joint_f_, theta, cluster_plus, sigma_s_, df);
 
         // Algorithm 1, Step 5: recursively build more manifolds.
 

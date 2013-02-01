@@ -30,15 +30,15 @@ namespace cv
         int num_pca_iterations_;
 
     private:
-        void buildManifoldsAndPerformFiltering(const Mat_<Point3d>& eta_k, const Mat_<uchar>& cluster_k, int current_tree_level);
+        void buildManifoldsAndPerformFiltering(const Mat_<Point3f>& eta_k, const Mat_<uchar>& cluster_k, int current_tree_level);
 
-        Mat_<Point3d> src_f_;
-        Mat_<Point3d> src_joint_f_;
+        Mat_<Point3f> src_f_;
+        Mat_<Point3f> src_joint_f_;
 
-        Mat_<Point3d> sum_w_ki_Psi_blur_;
-        Mat_<double> sum_w_ki_Psi_blur_0_;
+        Mat_<Point3f> sum_w_ki_Psi_blur_;
+        Mat_<float> sum_w_ki_Psi_blur_0_;
 
-        Mat_<double> min_pixel_dist_to_manifold_squared_;
+        Mat_<float> min_pixel_dist_to_manifold_squared_;
 
         RNG rng_;
 
