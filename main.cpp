@@ -61,18 +61,18 @@ int main(int argc, const char* argv[])
         }
     }
 
-    AdaptiveManifoldFilter filter;
-    filter.set("sigma_s", sigma_s);
-    filter.set("sigma_r", sigma_r);
-    filter.set("tree_height", tree_height);
-    filter.set("num_pca_iterations", num_pca_iterations);
+    Ptr<AdaptiveManifoldFilter> filter = AdaptiveManifoldFilter::create();
+    filter->set("sigma_s", sigma_s);
+    filter->set("sigma_r", sigma_r);
+    filter->set("tree_height", tree_height);
+    filter->set("num_pca_iterations", num_pca_iterations);
 
     Mat dst, tilde_dst;
-    filter.apply(img, dst, tilde_dst, jointImg);
+    filter->apply(img, dst, tilde_dst, jointImg);
 
     TickMeter tm;
     tm.start();
-    filter.apply(img, dst, tilde_dst, jointImg);
+    filter->apply(img, dst, tilde_dst, jointImg);
     tm.stop();
     cout << "Time : " << tm.getTimeMilli() << " ms" << endl;
 
