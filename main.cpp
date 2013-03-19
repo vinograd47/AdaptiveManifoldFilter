@@ -11,24 +11,24 @@ using namespace cv;
 int main(int argc, const char* argv[])
 {
     CommandLineParser cmd(argc, argv,
-        "{ @0                   |      | Input image }"
-        "{ o output             |      | Output image }"
-        "{ j joint              |      | Image for joint filtering (optional) }"
-        "{ s sigma_s            | 16.0 | Filter spatial standard deviation }"
-        "{ r sigma_r            | 0.2  | Filter range standard deviation }"
-        "{ t tree_height        | -1   | Height of the manifold tree (default = -1 : automatically computed) }"
-        "{ i num_pca_iterations | 1    | Number of iterations to computed the eigenvector v1 }"
-        "{ h help               |      | Print help message }"
+        "{ i | input              |      | Input image }"
+        "{ o | output             |      | Output image }"
+        "{ j | joint              |      | Image for joint filtering (optional) }"
+        "{ s | sigma_s            | 16.0 | Filter spatial standard deviation }"
+        "{ r | sigma_r            | 0.2  | Filter range standard deviation }"
+        "{ t | tree_height        | -1   | Height of the manifold tree (default = -1 : automatically computed) }"
+        "{ i | num_pca_iterations | 1    | Number of iterations to computed the eigenvector v1 }"
+        "{ h | help               |      | Print help message }"
     );
 
-    if (cmd.has("help"))
+    if (cmd.get<bool>("help"))
     {
-        cmd.about("This sample demonstrates adaptive manifold filter algorithm");
-        cmd.printMessage();
+        cout << "This sample demonstrates adaptive manifold filter algorithm" << endl;
+        cmd.printParams();
         return 0;
     }
 
-    const string inputImageName = cmd.get<string>(0);
+    const string inputImageName = cmd.get<string>("input");
     const string outputImageName = cmd.get<string>("output");
     const string jointImageName = cmd.get<string>("joint");
     const double sigma_s = cmd.get<double>("sigma_s");
@@ -36,16 +36,10 @@ int main(int argc, const char* argv[])
     const int tree_height = cmd.get<int>("tree_height");
     const int num_pca_iterations = cmd.get<int>("num_pca_iterations");
 
-    if (!cmd.check())
-    {
-        cmd.printErrors();
-        return -1;
-    }
-
     if (inputImageName.empty())
     {
         cerr << "Missing input image" << endl;
-        cmd.printMessage();
+        cmd.printParams();
         return -1;
     }
 
