@@ -60,7 +60,62 @@ namespace
         std::vector<Mat_<uchar> > cluster_minus;
         std::vector<Mat_<Point3f> > eta_plus;
         std::vector<Mat_<uchar> > cluster_plus;
+
+        void release();
     };
+
+    void Buf::release()
+    {
+        eta_1.release();
+        cluster_1.release();
+
+        tilde_dst.release();
+        alpha.release();
+        diff.release();
+        dst.release();
+
+        V.release();
+
+        dIcdx.release();
+        dIcdy.release();
+        dIdx.release();
+        dIdy.release();
+        dHdx.release();
+        dVdy.release();
+
+        t.release();
+
+        theta_masked.release();
+        mul.release();
+        numerator.release();
+        denominator.release();
+        numerator_filtered.release();
+        denominator_filtered.release();
+
+        X.release();
+        eta_k_small.release();
+        eta_k_big.release();
+        X_squared.release();
+        pixel_dist_to_manifold_squared.release();
+        gaussian_distance_weights.release();
+         Psi_splat.release();
+        Psi_splat_joined.release();
+        Psi_splat_joined_resized.release();
+        blurred_projected_values.release();
+        w_ki_Psi_blur.release();
+        w_ki_Psi_blur_0.release();
+        w_ki_Psi_blur_resized.release();
+        w_ki_Psi_blur_0_resized.release();
+        rand_vec.release();
+        v1.release();
+        Nx_v1_mult.release();
+        theta.release();
+
+        eta_minus.clear();
+        cluster_minus.clear();
+        eta_plus.clear();
+        cluster_plus.clear();
+    }
 
     class AdaptiveManifoldFilterImpl : public AdaptiveManifoldFilter
     {
@@ -70,6 +125,8 @@ namespace
         AdaptiveManifoldFilterImpl();
 
         void apply(InputArray src, OutputArray dst, OutputArray tilde_dst = noArray(), InputArray src_joint = noArray());
+
+        void collectGarbage();
 
     protected:
         double sigma_s_;
@@ -93,6 +150,7 @@ namespace
         RNG rng_;
 
         int cur_tree_height_;
+        float sigma_r_over_sqrt_2_;
     };
 
     AdaptiveManifoldFilterImpl::AdaptiveManifoldFilterImpl()
@@ -103,18 +161,31 @@ namespace
         num_pca_iterations_ = 1;
     }
 
+    void AdaptiveManifoldFilterImpl::collectGarbage()
+    {
+        buf_.release();
+
+        src_f_.release();
+        src_joint_f_.release();
+
+        sum_w_ki_Psi_blur_.release();
+        sum_w_ki_Psi_blur_0_.release();
+
+        min_pixel_dist_to_manifold_squared_.release();
+    }
+
     CV_INIT_ALGORITHM(AdaptiveManifoldFilterImpl, "AdaptiveManifoldFilter",
                       obj.info()->addParam(obj, "sigma_s", obj.sigma_s_, false, 0, 0, "Filter spatial standard deviation");
                       obj.info()->addParam(obj, "sigma_r", obj.sigma_r_, false, 0, 0, "Filter range standard deviation");
                       obj.info()->addParam(obj, "tree_height", obj.tree_height_, false, 0, 0, "Height of the manifold tree (default = -1 : automatically computed)");
                       obj.info()->addParam(obj, "num_pca_iterations", obj.num_pca_iterations_, false, 0, 0, "Number of iterations to computed the eigenvector v1"));
 
-    double Log2(double n)
+    inline double Log2(double n)
     {
         return log(n) / log(2.0);
     }
 
-    int computeManifoldTreeHeight(double sigma_s, double sigma_r)
+    inline int computeManifoldTreeHeight(double sigma_s, double sigma_r)
     {
         const double Hs = floor(Log2(sigma_s)) - 1.0;
         const double Lr = 1.0 - sigma_r;
@@ -146,9 +217,41 @@ namespace
         }
     }
 
-    void ensureSizeIsEnough(Size size, int type, Mat& m)
+    inline void ensureSizeIsEnough(Size size, int type, Mat& m)
     {
         ensureSizeIsEnough(size.height, size.width, type, m);
+    }
+
+    template <typename T>
+    inline void ensureSizeIsEnough(int rows, int cols, Mat_<T>& m)
+    {
+        if (m.empty() || m.data != m.datastart)
+            m.create(rows, cols);
+        else
+        {
+            const size_t esz = m.elemSize();
+            const ptrdiff_t delta2 = m.dataend - m.datastart;
+
+            const size_t minstep = m.cols * esz;
+
+            Size wholeSize;
+            wholeSize.height = std::max(static_cast<int>((delta2 - minstep) / m.step + 1), m.rows);
+            wholeSize.width = std::max(static_cast<int>((delta2 - m.step * (wholeSize.height - 1)) / esz), m.cols);
+
+            if (wholeSize.height < rows || wholeSize.width < cols)
+                m.create(rows, cols);
+            else
+            {
+                m.cols = cols;
+                m.rows = rows;
+            }
+        }
+    }
+
+    template <typename T>
+    inline void ensureSizeIsEnough(Size size, Mat_<T>& m)
+    {
+        ensureSizeIsEnough(size.height, size.width, m);
     }
 
     template <typename T>
@@ -158,7 +261,7 @@ namespace
 
         const float a = exp(-sqrt(2.0f) / sigma);
 
-        ensureSizeIsEnough(src.size(), src.type(), dst);
+        ensureSizeIsEnough(src.size(), dst);
         src.copyTo(dst);
 
         for (int y = 0; y < src.rows; ++y)
@@ -204,7 +307,7 @@ namespace
         CV_DbgAssert( a.depth() == CV_32F );
         CV_DbgAssert( a.size() == b.size() );
 
-        ensureSizeIsEnough(a.size(), a.type(), dst);
+        ensureSizeIsEnough(a.size(), dst);
 
         for (int y = 0; y < a.rows; ++y)
         {
@@ -225,7 +328,7 @@ namespace
         CV_DbgAssert( a.depth() == CV_32F );
         CV_DbgAssert( a.size() == b.size() );
 
-        ensureSizeIsEnough(a.size(), a.type(), dst);
+        ensureSizeIsEnough(a.size(), dst);
 
         for (int y = 0; y < a.rows; ++y)
         {
@@ -240,41 +343,49 @@ namespace
         }
     }
 
-    void AdaptiveManifoldFilterImpl::apply(InputArray src, OutputArray _dst, OutputArray _tilde_dst, InputArray src_joint)
+    void AdaptiveManifoldFilterImpl::apply(InputArray _src, OutputArray _dst, OutputArray _tilde_dst, InputArray _src_joint)
     {
-        CV_Assert( src.type() == CV_8UC3 );
-        CV_Assert( src_joint.empty() || (src_joint.type() == src.type() && src_joint.size() == src.size()) );
+        const Mat src = _src.getMat();
+        const Mat src_joint = _src_joint.getMat();
 
-        ensureSizeIsEnough(src.size(), src_f_.type(), src_f_);
-        src.getMat().convertTo(src_f_, src_f_.type(), 1.0 / 255.0);
+        const Size srcSize = src.size();
+
+        CV_Assert( src.type() == CV_8UC3 );
+        CV_Assert( src_joint.empty() || (src_joint.type() == src.type() && src_joint.size() == srcSize) );
+
+        ensureSizeIsEnough(srcSize, src_f_);
+        src.convertTo(src_f_, src_f_.type(), 1.0 / 255.0);
 
         // Use the center pixel as seed to random number generation.
         const Point3f centralPix = src_f_(src_f_.rows / 2, src_f_.cols / 2);
-        rng_ = RNG(static_cast<uint64>(centralPix.ddot(centralPix) * numeric_limits<uint64>::max()));
+        rng_.state = static_cast<uint64>(centralPix.ddot(centralPix) * numeric_limits<uint64>::max());
 
-        ensureSizeIsEnough(src_f_.size(), sum_w_ki_Psi_blur_.type(), sum_w_ki_Psi_blur_);
+        ensureSizeIsEnough(srcSize, sum_w_ki_Psi_blur_);
         sum_w_ki_Psi_blur_.setTo(Scalar::all(0));
 
-        ensureSizeIsEnough(src_f_.size(), sum_w_ki_Psi_blur_0_.type(), sum_w_ki_Psi_blur_0_);
+        ensureSizeIsEnough(srcSize, sum_w_ki_Psi_blur_0_);
         sum_w_ki_Psi_blur_0_.setTo(Scalar::all(0));
 
-        ensureSizeIsEnough(src_f_.size(), min_pixel_dist_to_manifold_squared_.type(), min_pixel_dist_to_manifold_squared_);
+        ensureSizeIsEnough(srcSize, min_pixel_dist_to_manifold_squared_);
         min_pixel_dist_to_manifold_squared_.setTo(Scalar::all(numeric_limits<float>::max()));
 
         // If the tree_height was not specified, compute it using Eq. (10) of our paper.
         cur_tree_height_ = tree_height_ > 0 ? tree_height_ : computeManifoldTreeHeight(sigma_s_, sigma_r_);
 
         // If no joint signal was specified, use the original signal
-        ensureSizeIsEnough(src.size(), src_joint_f_.type(), src_joint_f_);
+        ensureSizeIsEnough(srcSize, src_joint_f_);
         if (src_joint.empty())
             src_f_.copyTo(src_joint_f_);
         else
-            src_joint.getMat().convertTo(src_joint_f_, src_joint_f_.type(), 1.0 / 255.0);
+            src_joint.convertTo(src_joint_f_, src_joint_f_.type(), 1.0 / 255.0);
+
+        // Dividing the covariance matrix by 2 is equivalent to dividing the standard deviations by sqrt(2).
+        sigma_r_over_sqrt_2_ = static_cast<float>(sigma_r_ / sqrt(2.0));
 
         // Algorithm 1, Step 1: compute the first manifold by low-pass filtering.
         h_filter(src_joint_f_, buf_.eta_1, static_cast<float>(sigma_s_));
 
-        ensureSizeIsEnough(src_f_.size(), buf_.cluster_1.type(), buf_.cluster_1);
+        ensureSizeIsEnough(srcSize, buf_.cluster_1);
         buf_.cluster_1.setTo(Scalar::all(1));
 
         buf_.eta_minus.resize(cur_tree_height_);
@@ -287,14 +398,14 @@ namespace
         rdivide(sum_w_ki_Psi_blur_, sum_w_ki_Psi_blur_0_, buf_.tilde_dst);
 
         // Adjust the filter response for outlier pixels -- Eq. (10)
-        ensureSizeIsEnough(src_f_.size(), buf_.alpha.type(), buf_.alpha);
+        ensureSizeIsEnough(srcSize, buf_.alpha);
         exp(min_pixel_dist_to_manifold_squared_ * (-0.5 / sigma_r_ / sigma_r_), buf_.alpha);
 
-        ensureSizeIsEnough(src_f_.size(), buf_.diff.type(), buf_.diff);
+        ensureSizeIsEnough(srcSize, buf_.diff);
         subtract(buf_.tilde_dst, src_f_, buf_.diff);
         times(buf_.diff, buf_.alpha, buf_.diff);
 
-        ensureSizeIsEnough(src_f_.size(), buf_.dst.type(), buf_.dst);
+        ensureSizeIsEnough(srcSize, buf_.dst);
         add(src_f_, buf_.diff, buf_.dst);
 
         buf_.dst.convertTo(_dst, CV_8U, 255.0);
@@ -302,14 +413,14 @@ namespace
             buf_.tilde_dst.convertTo(_tilde_dst, CV_8U, 255.0);
     }
 
-    double floor_to_power_of_two(double r)
+    inline double floor_to_power_of_two(double r)
     {
         return pow(2.0, floor(Log2(r)));
     }
 
     void channelsSum(const Mat_<Point3f>& src, Mat_<float>& dst)
     {
-        ensureSizeIsEnough(src.size(), dst.type(), dst);
+        ensureSizeIsEnough(src.size(), dst);
 
         for (int y = 0; y < src.rows; ++y)
         {
@@ -326,7 +437,7 @@ namespace
 
     void phi(const Mat_<float>& src, Mat_<float>& dst, float sigma)
     {
-        ensureSizeIsEnough(src.size(), dst.type(), dst);
+        ensureSizeIsEnough(src.size(), dst);
 
         for (int y = 0; y < dst.rows; ++y)
         {
@@ -342,7 +453,7 @@ namespace
 
     void catCn(const Mat_<Point3f>& a, const Mat_<float>& b, Mat_<Vec4f>& dst)
     {
-        ensureSizeIsEnough(a.size(), dst.type(), dst);
+        ensureSizeIsEnough(a.size(), dst);
 
         for (int y = 0; y < a.rows; ++y)
         {
@@ -361,7 +472,7 @@ namespace
 
     void diffY(const Mat_<Point3f>& src, Mat_<Point3f>& dst)
     {
-        ensureSizeIsEnough(src.rows - 1, src.cols, dst.type(), dst);
+        ensureSizeIsEnough(src.rows - 1, src.cols, dst);
 
         for (int y = 0; y < src.rows - 1; ++y)
         {
@@ -378,7 +489,7 @@ namespace
 
     void diffX(const Mat_<Point3f>& src, Mat_<Point3f>& dst)
     {
-        ensureSizeIsEnough(src.rows, src.cols - 1, dst.type(), dst);
+        ensureSizeIsEnough(src.rows, src.cols - 1, dst);
 
         for (int y = 0; y < src.rows; ++y)
         {
@@ -398,10 +509,10 @@ namespace
 
         const float a = exp(-sqrt(2.0f) / sigma);
 
-        ensureSizeIsEnough(I.size(), dst.type(), dst);
+        ensureSizeIsEnough(I.size(), dst);
         I.copyTo(dst);
 
-        ensureSizeIsEnough(DH.size(), buf.V.type(), buf.V);
+        ensureSizeIsEnough(DH.size(), buf.V);
 
         for (int y = 0; y < DH.rows; ++y)
         {
@@ -505,7 +616,7 @@ namespace
         diffX(src_joint, buf.dIcdx);
         diffY(src_joint, buf.dIcdy);
 
-        ensureSizeIsEnough(src.size(), buf.dIdx.type(), buf.dIdx);
+        ensureSizeIsEnough(src.size(), buf.dIdx);
         buf.dIdx.setTo(Scalar::all(0));
         for (int y = 0; y < src.rows; ++y)
         {
@@ -519,7 +630,7 @@ namespace
             }
         }
 
-        ensureSizeIsEnough(src.size(), buf.dIdy.type(), buf.dIdy);
+        ensureSizeIsEnough(src.size(), buf.dIdy);
         buf.dIdy.setTo(Scalar::all(0));
         for (int y = 1; y < src.rows; ++y)
         {
@@ -533,23 +644,23 @@ namespace
             }
         }
 
-        ensureSizeIsEnough(buf.dIdx.size(), buf.dHdx.type(), buf.dHdx);
+        ensureSizeIsEnough(buf.dIdx.size(), buf.dHdx);
         buf.dIdx.convertTo(buf.dHdx, buf.dHdx.type(), (sigma_s / sigma_r) * (sigma_s / sigma_r), (sigma_s / sigma_s) * (sigma_s / sigma_s));
         sqrt(buf.dHdx, buf.dHdx);
 
-        ensureSizeIsEnough(buf.dIdy.size(), buf.dVdy.type(), buf.dVdy);
+        ensureSizeIsEnough(buf.dIdy.size(), buf.dVdy);
         buf.dIdy.convertTo(buf.dVdy, buf.dVdy.type(), (sigma_s / sigma_r) * (sigma_s / sigma_r), (sigma_s / sigma_s) * (sigma_s / sigma_s));
         sqrt(buf.dVdy, buf.dVdy);
 
-        ensureSizeIsEnough(src.size(), dst.type(), dst);
+        ensureSizeIsEnough(src.size(), dst);
         src.copyTo(dst);
         TransformedDomainRecursiveFilter(src, buf.dHdx, buf.dVdy, dst, sigma_s, buf);
     }
 
     void split_3_1(const Mat_<Vec4f>& src, Mat_<Point3f>& dst1, Mat_<float>& dst2)
     {
-        dst1.create(src.size());
-        dst2.create(src.size());
+        ensureSizeIsEnough(src.size(), dst1);
+        ensureSizeIsEnough(src.size(), dst2);
 
         for (int y = 0; y < src.rows; ++y)
         {
@@ -572,10 +683,10 @@ namespace
         CV_DbgAssert( X.rows == mask.size().area() );
         CV_DbgAssert( rand_vec.rows == 1 );
 
-        ensureSizeIsEnough(rand_vec.size(), dst.type(), dst);
+        ensureSizeIsEnough(rand_vec.size(), dst);
         rand_vec.copyTo(dst);
 
-        ensureSizeIsEnough(X.size(), buf.t.type(), buf.t);
+        ensureSizeIsEnough(X.size(), buf.t);
 
         float* dst_row = dst[0];
 
@@ -622,7 +733,7 @@ namespace
 
     void calcEta(const Mat_<Point3f>& src_joint_f, const Mat_<float>& theta, const Mat_<uchar>& cluster, Mat_<Point3f>& dst, float sigma_s, float df, Buf& buf)
     {
-        ensureSizeIsEnough(theta.size(), buf.theta_masked.type(), buf.theta_masked);
+        ensureSizeIsEnough(theta.size(), buf.theta_masked);
         buf.theta_masked.setTo(Scalar::all(0));
         theta.copyTo(buf.theta_masked, cluster);
 
@@ -630,10 +741,10 @@ namespace
 
         const Size nsz = Size(saturate_cast<int>(buf.mul.cols * (1.0 / df)), saturate_cast<int>(buf.mul.rows * (1.0 / df)));
 
-        ensureSizeIsEnough(nsz, buf.numerator.type(), buf.numerator);
+        ensureSizeIsEnough(nsz, buf.numerator);
         resize(buf.mul, buf.numerator, Size(), 1.0 / df, 1.0 / df);
 
-        ensureSizeIsEnough(nsz, buf.denominator.type(), buf.denominator);
+        ensureSizeIsEnough(nsz, buf.denominator);
         resize(buf.theta_masked, buf.denominator, Size(), 1.0 / df, 1.0 / df);
 
         h_filter(buf.numerator, buf.numerator_filtered, sigma_s / df);
@@ -644,10 +755,6 @@ namespace
 
     void AdaptiveManifoldFilterImpl::buildManifoldsAndPerformFiltering(const Mat_<Point3f>& eta_k, const Mat_<uchar>& cluster_k, int current_tree_level)
     {
-        // Dividing the covariance matrix by 2 is equivalent to dividing the standard deviations by sqrt(2).
-
-        const float sigma_r_over_sqrt_2 = static_cast<float>(sigma_r_ / sqrt(2.0));
-
         // Compute downsampling factor
 
         double df = min(sigma_s_ / 4.0, 256.0 * sigma_r_);
@@ -658,33 +765,33 @@ namespace
 
         if (eta_k.rows == src_joint_f_.rows)
         {
-            ensureSizeIsEnough(src_joint_f_.size(), buf_.X.type(), buf_.X);
+            ensureSizeIsEnough(src_joint_f_.size(), buf_.X);
             subtract(src_joint_f_, eta_k, buf_.X);
 
             const Size nsz = Size(saturate_cast<int>(eta_k.cols * (1.0 / df)), saturate_cast<int>(eta_k.rows * (1.0 / df)));
-            ensureSizeIsEnough(nsz, buf_.eta_k_small.type(), buf_.eta_k_small);
+            ensureSizeIsEnough(nsz, buf_.eta_k_small);
             resize(eta_k, buf_.eta_k_small, Size(), 1.0 / df, 1.0 / df);
         }
         else
         {
-            ensureSizeIsEnough(eta_k.size(), buf_.eta_k_small.type(), buf_.eta_k_small);
+            ensureSizeIsEnough(eta_k.size(), buf_.eta_k_small);
             eta_k.copyTo(buf_.eta_k_small);
 
-            ensureSizeIsEnough(src_joint_f_.size(), buf_.eta_k_big.type(), buf_.eta_k_big);
+            ensureSizeIsEnough(src_joint_f_.size(), buf_.eta_k_big);
             resize(eta_k, buf_.eta_k_big, src_joint_f_.size());
 
-            ensureSizeIsEnough(src_joint_f_.size(), buf_.X.type(), buf_.X);
+            ensureSizeIsEnough(src_joint_f_.size(), buf_.X);
             subtract(src_joint_f_, buf_.eta_k_big, buf_.X);
         }
 
         // Project pixel colors onto the manifold -- Eq. (3), Eq. (5)
 
-        ensureSizeIsEnough(buf_.X.size(), buf_.X_squared.type(), buf_.X_squared);
+        ensureSizeIsEnough(buf_.X.size(), buf_.X_squared);
         multiply(buf_.X, buf_.X, buf_.X_squared);
 
         channelsSum(buf_.X_squared, buf_.pixel_dist_to_manifold_squared);
 
-        phi(buf_.pixel_dist_to_manifold_squared, buf_.gaussian_distance_weights, sigma_r_over_sqrt_2);
+        phi(buf_.pixel_dist_to_manifold_squared, buf_.gaussian_distance_weights, sigma_r_over_sqrt_2_);
 
         times(src_f_, buf_.gaussian_distance_weights, buf_.Psi_splat);
 
@@ -698,10 +805,10 @@ namespace
 
         catCn(buf_.Psi_splat, Psi_splat_0, buf_.Psi_splat_joined);
 
-        ensureSizeIsEnough(buf_.eta_k_small.size(), buf_.Psi_splat_joined_resized.type(), buf_.Psi_splat_joined_resized);
+        ensureSizeIsEnough(buf_.eta_k_small.size(), buf_.Psi_splat_joined_resized);
         resize(buf_.Psi_splat_joined, buf_.Psi_splat_joined_resized, buf_.eta_k_small.size());
 
-        RF_filter(buf_.Psi_splat_joined_resized, buf_.eta_k_small, buf_.blurred_projected_values, static_cast<float>(sigma_s_ / df), sigma_r_over_sqrt_2, buf_);
+        RF_filter(buf_.Psi_splat_joined_resized, buf_.eta_k_small, buf_.blurred_projected_values, static_cast<float>(sigma_s_ / df), sigma_r_over_sqrt_2_, buf_);
 
         split_3_1(buf_.blurred_projected_values, buf_.w_ki_Psi_blur, buf_.w_ki_Psi_blur_0);
 
@@ -712,12 +819,12 @@ namespace
 
         const Mat_<float>& w_ki = buf_.gaussian_distance_weights;
 
-        ensureSizeIsEnough(src_f_.size(), buf_.w_ki_Psi_blur_resized.type(), buf_.w_ki_Psi_blur_resized);
+        ensureSizeIsEnough(src_f_.size(), buf_.w_ki_Psi_blur_resized);
         resize(buf_.w_ki_Psi_blur, buf_.w_ki_Psi_blur_resized, src_f_.size());
         times(buf_.w_ki_Psi_blur_resized, w_ki, buf_.w_ki_Psi_blur_resized);
         add(sum_w_ki_Psi_blur_, buf_.w_ki_Psi_blur_resized, sum_w_ki_Psi_blur_);
 
-        ensureSizeIsEnough(src_f_.size(), buf_.w_ki_Psi_blur_0_resized.type(), buf_.w_ki_Psi_blur_0_resized);
+        ensureSizeIsEnough(src_f_.size(), buf_.w_ki_Psi_blur_0_resized);
         resize(buf_.w_ki_Psi_blur_0, buf_.w_ki_Psi_blur_0_resized, src_f_.size());
         times(buf_.w_ki_Psi_blur_0_resized, w_ki, buf_.w_ki_Psi_blur_0_resized);
         add(sum_w_ki_Psi_blur_0_, buf_.w_ki_Psi_blur_0_resized, sum_w_ki_Psi_blur_0_);
@@ -729,31 +836,31 @@ namespace
             // Algorithm 1, Step 2: compute the eigenvector v1
             const Mat_<float> nX(src_joint_f_.size().area(), 3, (float*) buf_.X.data);
 
-            ensureSizeIsEnough(1, nX.cols, buf_.rand_vec.type(), buf_.rand_vec);
+            ensureSizeIsEnough(1, nX.cols, buf_.rand_vec);
             rng_.fill(buf_.rand_vec, RNG::UNIFORM, -0.5, 0.5);
 
             computeEigenVector(nX, cluster_k, buf_.v1, num_pca_iterations_, buf_.rand_vec, buf_);
 
             // Algorithm 1, Step 3: Segment pixels into two clusters -- Eq. (6)
 
-            ensureSizeIsEnough(nX.rows, buf_.v1.rows, buf_.Nx_v1_mult.type(), buf_.Nx_v1_mult);
+            ensureSizeIsEnough(nX.rows, buf_.v1.rows, buf_.Nx_v1_mult);
             gemm(nX, buf_.v1, 1.0, noArray(), 0.0, buf_.Nx_v1_mult, GEMM_2_T);
 
             const Mat_<float> dot(src_joint_f_.rows, src_joint_f_.cols, (float*) buf_.Nx_v1_mult.data);
 
             Mat_<uchar>& cluster_minus = buf_.cluster_minus[current_tree_level];
-            ensureSizeIsEnough(dot.size(), cluster_minus.type(), cluster_minus);
+            ensureSizeIsEnough(dot.size(), cluster_minus);
             compare(dot, 0, cluster_minus, CMP_LT);
             bitwise_and(cluster_minus, cluster_k, cluster_minus);
 
             Mat_<uchar>& cluster_plus = buf_.cluster_plus[current_tree_level];
-            ensureSizeIsEnough(dot.size(), cluster_plus.type(), cluster_plus);
+            ensureSizeIsEnough(dot.size(), cluster_plus);
             compare(dot, 0, cluster_plus, CMP_GT);
             bitwise_and(cluster_plus, cluster_k, cluster_plus);
 
             // Algorithm 1, Step 4: Compute new manifolds by weighted low-pass filtering -- Eq. (7-8)
 
-            ensureSizeIsEnough(w_ki.size(), buf_.theta.type(), buf_.theta);
+            ensureSizeIsEnough(w_ki.size(), buf_.theta);
             buf_.theta.setTo(Scalar::all(1.0));
             subtract(buf_.theta, w_ki, buf_.theta);
 

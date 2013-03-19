@@ -19,6 +19,8 @@ namespace cv
          */
         virtual void apply(InputArray src, OutputArray dst, OutputArray tilde_dst = noArray(), InputArray src_joint = noArray()) = 0;
 
+        virtual void collectGarbage() = 0;
+
         static Ptr<AdaptiveManifoldFilter> create();
     };
 }
