@@ -358,7 +358,8 @@ namespace
 
         // Use the center pixel as seed to random number generation.
         const Point3f centralPix = src_f_(src_f_.rows / 2, src_f_.cols / 2);
-        rng_.state = static_cast<uint64>(centralPix.ddot(centralPix) * numeric_limits<uint>::max());
+        const double seedCoeff = (centralPix.x + centralPix.y + centralPix.z + 1.0f) / 4.0f;
+        rng_.state = static_cast<uint64>(seedCoeff * numeric_limits<uint64>::max());
 
         ensureSizeIsEnough(srcSize, sum_w_ki_Psi_blur_);
         sum_w_ki_Psi_blur_.setTo(Scalar::all(0));
