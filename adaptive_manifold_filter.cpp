@@ -308,6 +308,7 @@ namespace
         CV_DbgAssert( a.size() == b.size() );
 
         ensureSizeIsEnough(a.size(), dst);
+        dst.setTo(0);
 
         for (int y = 0; y < a.rows; ++y)
         {
@@ -317,7 +318,8 @@ namespace
 
             for (int x = 0; x < a.cols; ++x)
             {
-                dst_row[x] = a_row[x] * (1.0f / b_row[x]);
+                if (b_row[x] > numeric_limits<float>::epsilon())
+                    dst_row[x] = a_row[x] * (1.0f / b_row[x]);
             }
         }
     }
